@@ -1,0 +1,2 @@
+# LF in the repo on every platform, so tools that rewrite files (npm, formatters) leave no spurious diffs.
+* text=auto eol=lf

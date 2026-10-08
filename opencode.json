@@ -1,0 +1,16 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "permission": {
+    "read": {
+      "~/.config/arkui-sem/*": "deny"
+    },
+    "external_directory": {
+      "~/.config/arkui-sem/*": "deny"
+    },
+    "bash": {
+      "*.config/arkui-sem*": "deny",
+      "*arkui-sem config*": "deny",
+      "*cli.js config*": "deny"
+    }
+  }
+}

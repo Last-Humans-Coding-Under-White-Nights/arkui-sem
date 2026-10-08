@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "deny": [
+      "Read(~/.config/arkui-sem/**)",
+      "Edit(~/.config/arkui-sem/**)",
+      "Bash(*.config/arkui-sem*)",
+      "Bash(*arkui-sem config*)",
+      "Bash(*cli.js config*)",
+      "PowerShell(*.config*arkui-sem*)",
+      "PowerShell(*arkui-sem config*)",
+      "PowerShell(*cli.js config*)"
+    ]
+  }
+}

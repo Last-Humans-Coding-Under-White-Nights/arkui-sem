@@ -1,0 +1,169 @@
+// Candidates → judgments (cached) → findings/questions, and their text for agents.
+import { createHash } from "node:crypto";
+import { dirname, relative } from "node:path";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import type { Questions } from "@typesafe-ai/sdk";
+import { buildSlice, Q_R1, Q_R2, Q_R3, type SystemOneBackend } from "./judge.js";
+import { type Candidate, candidates, type FactExtractor, type FileFacts, NaiveExtractor, nestedDepth } from "./analysis.js";
+
+// --- Formatting ---
+
+const pct = (p: number | null) => (p === null ? "judge unavailable" : `p=${p.toFixed(2)}`);
+
+export function formatForAgent(findings: Finding[], cwd = process.cwd()): string {
+  if (findings.length === 0) return "";
+  const out: string[] = [];
+  const confident = findings.filter((f) => f.band === "finding");
+  const questions = findings.filter((f) => f.band === "question");
+  out.push(`arkui-sem: ${confident.length} finding(s), ${questions.length} question(s) about ArkUI state semantics.`);
+
+  for (const f of confident) {
+    out.push(`- [${f.rule} ${f.kind}] ${relative(cwd, f.file)}:${f.line} ${f.subject} (${pct(f.p)}, ${f.backend})`);
+    out.push(`  why: ${f.evidence}`);
+    out.push(`  fix: ${f.fix}`);
+  }
+  for (const f of questions) {
+    out.push(`- [${f.rule}?] ${relative(cwd, f.file)}:${f.line} ${f.subject} (${pct(f.p)}, ${f.backend})`);
+    out.push(`  ${f.evidence}. Is this intended? If it should behave reactively/be released: ${f.fix}`);
+    out.push(`  If it is intentional, leave it and add \`// arkui-sem-disable-next-line ${f.rule} -- <reason>\` above line ${f.line}.`);
+  }
+  return out.join("\n");
+}
+
+// --- Engine ---
+
+export type Band = "finding" | "question";
+
+export interface Finding {
+  fingerprint: string;
+  rule: Candidate["rule"];
+  kind: Candidate["kind"];
+  file: string;
+  line: number;
+  component: string;
+  subject: string;
+  /** P(violation); null when the judge failed. */
+  p: number | null;
+  band: Band;
+  backend: string;
+  evidence: string;
+  fix: string;
+}
+
+export interface EngineOptions {
+  backend: SystemOneBackend;
+  extractor?: FactExtractor;
+  /** P ≥ finding → reported as a finding; question ≤ P < finding → asked as a question; below → dropped. */
+  thresholds?: { finding: number; question: number };
+  cachePath?: string;
+  taskContext?: string;
+  judgeTimeoutMs?: number;
+}
+
+const QUESTIONS: Record<Candidate["rule"], Questions> = { R1: Q_R1, R2: Q_R2, R3: Q_R3 };
+const VIOLATION_LABEL: Record<Candidate["rule"], string> = { R1: "desync_bug", R2: "shared_with_parent", R3: "leak_bug" };
+// R2 label assumes the @Link → @Prop mismatch (shared intent); callers map the other intent × decorator pairs.
+
+class JudgmentCache {
+  private entries: Record<string, number> = {};
+  constructor(private readonly path?: string) {
+    if (!path) return;
+    try { this.entries = JSON.parse(readFileSync(path, "utf8")); } catch { /* empty or missing cache */ }
+  }
+  get(key: string): number | undefined { return this.entries[key]; }
+  set(key: string, p: number) { this.entries[key] = p; }
+  save() {
+    if (!this.path) return;
+    mkdirSync(dirname(this.path), { recursive: true });
+    writeFileSync(this.path, JSON.stringify(this.entries));
+  }
+}
+
+function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+  return Promise.race([p, new Promise<T>((_, reject) => setTimeout(() => reject(new Error(`judge timed out after ${ms} ms`)), ms))]);
+}
+
+function describe(facts: FileFacts, c: Candidate): { subject: string; evidence: string; fix: string } {
+  const v2 = c.component.version === "V2";
+  if (c.resource) {
+    const r = c.resource;
+    const release = r.release;
+    return {
+      subject: `${c.component.name} ${r.key}`,
+      evidence: `${r.kind} acquired in ${r.acquireIn}() at line ${r.acquireLine}; no matching release in aboutToDisappear/onPageHide`,
+      fix: `release it in aboutToDisappear(): ${release}.${r.kind === "listener" ? " Keep the handler in a field so off() receives the same reference." : ""}`,
+    };
+  }
+  const f = c.field!;
+  const writes = f.writes.slice(0, 2).map((w) => `${w.context} in ${w.method}() line ${w.line}`).join("; ");
+  if (c.kind === "nested-write-unobserved") {
+    const w = f.writes.find((x) => x.line === c.line) ?? f.writes[0];
+    const path = w?.nestedPath ?? "";
+    const type = f.type?.replace(/\[\]$/, "") ?? "<its class>";
+    const first = path.match(/^\??\.(\w+)/)?.[1];
+    const at = `${w?.context} in ${w?.method}() line ${w?.line}`;
+    if (v2) {
+      return {
+        subject: `${c.component.name}.${f.name}${path}`,
+        evidence: `${f.decorators.join(" ")} field's property written in place (${at}); V2 state only sees reassignment unless the class is @ObservedV2`,
+        fix: `mark class ${type} @ObservedV2 and the mutated properties @Trace.`,
+      };
+    }
+    return {
+      subject: `${c.component.name}.${f.name}${path}`,
+      evidence: `${f.decorators.join(" ")} field written ${nestedDepth(path)} levels deep (${at}); V1 state decorators observe only first-layer changes, and @Observed on the classes alone does not change that`,
+      fix: `change it at the first layer instead, e.g. build a new object and assign this.${f.name}${first ? `.${first}` : ""} = <new object> (or reassign this.${f.name}); or render the nested object in a child component that receives it as @ObjectLink (its class @Observed) and mutate it there.`,
+    };
+  }
+  return {
+    subject: `${c.component.name}.${f.name}`,
+    evidence: `rendered in build() (line ${f.readsInBuild[0]}) and written after init (${writes}); no state decorator`,
+    fix: v2
+      ? `declare it @Local; if the value comes from the parent, use @Param plus an @Event callback instead.`
+      : `declare it @State; if the value comes from the parent, use @Prop (one-way) or @Link (two-way) instead.`,
+  };
+}
+
+export async function checkFiles(files: string[], opts: EngineOptions): Promise<{ findings: Finding[]; errors: string[] }> {
+  const extractor = opts.extractor ?? new NaiveExtractor();
+  const thresholds = opts.thresholds ?? { finding: 0.8, question: 0.5 };
+  const cache = new JudgmentCache(opts.cachePath);
+  const findings: Finding[] = [];
+  const errors: string[] = [];
+
+  for (const file of files) {
+    let facts: FileFacts;
+    try {
+      facts = extractor.extract(file, readFileSync(file, "utf8"));
+    } catch (e) {
+      errors.push(`${file}: ${(e as Error).message}`);
+      continue;
+    }
+    for (const c of candidates(facts)) {
+      const slice = buildSlice(facts, c, opts.taskContext);
+      const questions = QUESTIONS[c.rule];
+      const key = createHash("sha256").update(opts.backend.name).update(JSON.stringify(slice)).update(Object.keys(questions).join()).digest("hex");
+
+      let p: number | null = cache.get(key) ?? null;
+      if (p === null) {
+        try {
+          const { answers } = await withTimeout(opts.backend.systemOne(slice, questions), opts.judgeTimeoutMs ?? 8000);
+          const verdict = answers.verdict;
+          if (verdict?.type === "choice") {
+            p = verdict.probabilities[VIOLATION_LABEL[c.rule]] ?? null;
+            if (p !== null) cache.set(key, p);
+          }
+        } catch (e) {
+          errors.push(`${opts.backend.name}: ${(e as Error).message}`);
+        }
+      }
+
+      // Judge unavailable → degrade to deterministic-only and ask rather than assert.
+      const band: Band | null = p === null ? "question" : p >= thresholds.finding ? "finding" : p >= thresholds.question ? "question" : null;
+      if (band === null) continue;
+      findings.push({ fingerprint: c.fingerprint, rule: c.rule, kind: c.kind, file, line: c.line, component: c.component.name, p, band, backend: opts.backend.name, ...describe(facts, c) });
+    }
+  }
+  cache.save();
+  return { findings, errors };
+}

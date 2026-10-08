@@ -1,0 +1,48 @@
+# Codex rules for this repo; same intent as .claude/settings.json and opencode.json (see AGENTS.md).
+# Rules match a command's leading tokens exactly (no wildcards), so they cover the usual spellings only;
+# AGENTS.md states the rule itself. Commands are split POSIX-style, so Windows backslash paths never match;
+# the forward-slash spellings (PowerShell accepts them too) are covered. Loaded only when the project's .codex/ layer is trusted.
+# Test: codex execpolicy check --pretty --rules .codex/rules/arkui-sem.rules -- <command>
+
+KEY_FILE = [
+    "~/.config/arkui-sem/config.json",
+    "$HOME/.config/arkui-sem/config.json",
+    "${HOME}/.config/arkui-sem/config.json",
+    "~/.config/arkui-sem",
+    "$env:USERPROFILE/.config/arkui-sem/config.json",
+]
+
+prefix_rule(
+    pattern = [
+        ["cat", "head", "tail", "less", "more", "type", "bat", "sed", "awk", "grep", "rg", "jq", "xxd", "od",
+         "base64", "strings", "cp", "mv", "Get-Content", "gc", "Copy-Item", "code", "notepad"],
+        KEY_FILE,
+    ],
+    decision = "forbidden",
+    justification = "~/.config/arkui-sem/config.json holds the user's API keys: never read it. Live runs load it through the arkui-sem process.",
+    match = ["cat ~/.config/arkui-sem/config.json", "Get-Content $env:USERPROFILE/.config/arkui-sem/config.json"],
+    not_match = ["cat arkui-sem/src/config.ts"],
+)
+
+prefix_rule(
+    pattern = ["arkui-sem", "config"],
+    decision = "forbidden",
+    justification = "`arkui-sem config` prints masked key fragments.",
+    match = ["arkui-sem config"],
+    not_match = ["arkui-sem check src"],
+)
+
+prefix_rule(
+    pattern = ["npx", "arkui-sem", "config"],
+    decision = "forbidden",
+    justification = "`arkui-sem config` prints masked key fragments.",
+    match = ["npx arkui-sem config --init"],
+)
+
+prefix_rule(
+    pattern = ["node", ["dist/cli.js", "./dist/cli.js", "arkui-sem/dist/cli.js", "../arkui-sem/dist/cli.js"], "config"],
+    decision = "forbidden",
+    justification = "`arkui-sem config` prints masked key fragments.",
+    match = ["node dist/cli.js config", "node arkui-sem/dist/cli.js config --init"],
+    not_match = ["node dist/cli.js check entry"],
+)
