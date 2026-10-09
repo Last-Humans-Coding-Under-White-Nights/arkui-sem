@@ -334,15 +334,55 @@ export class HeuristicBackend implements SystemOneBackend {
     const answers: Record<string, Answer> = {};
 
     if (s.rule === "R1") {
-      const staticName = typeof cand.field === "string" && INTENTIONALLY_STATIC.test(cand.field);
-      const p = cand.kind === "nested-write-unobserved" ? (cand.type_declared_in_file ? 0.85 : 0.6) : staticName ? 0.55 : 0.85;
-      answers.is_ui_state = { type: "noul", noul: staticName ? 0.4 : 0.85 };
-      answers.intended_static = { type: "noul", noul: staticName ? 0.6 : 0.15 };
+      const field = typeof cand.field === "string" ? cand.field : "";
+      const type = typeof cand.type === "string" ? cand.type : "";
+      const writes = Array.isArray(cand.writes) ? cand.writes : [];
+
+      // 1. Controller / ViewModel / Manager / Service hard filter
+      const isControllerOrModel =
+        /Controller|Scroller|Context|Worker|Mutex|Client|Reporter|ViewModel|Manager|Service/i.test(type) ||
+        /Controller|Scroller|Context|Worker|Mutex|Client|Reporter|ViewModel|Manager|Service/i.test(field);
+
+      let p = 0.55;
+      if (isControllerOrModel) {
+        p = 0.05;
+      } else {
+        const contexts = writes.map((w: any) => w.context);
+        const methods = writes.map((w: any) => w.method).filter(Boolean);
+
+        const onlyLifecycle = contexts.length > 0 && contexts.every((c: string) => c === "lifecycle");
+        const allInitHelpers =
+          methods.length > 0 &&
+          methods.every((m: string) => /^init|^calculate|^compute|^setup|^processUiExtNode|Init$/i.test(m));
+        const hasInteractive = contexts.some((c: string) => c === "method" || c === "async-callback" || c === "build-closure");
+        const hasDirectBuildWrite = contexts.some((c: string) => c === "build");
+        const isStaticName =
+          /(?:debug|log|trace|cache|tmp|temp|prev|last|timer|handle|controller|listener|config|style)|(?:Id|Ms|Ts|At|Flag|Config|Style)$/i.test(
+            field,
+          ) && !/^item|^items/i.test(field);
+
+        // Calibrated logistic regression formula (v3 model)
+        let z = -0.30;
+        if (onlyLifecycle || allInitHelpers) {
+          z -= 2.0;
+        } else if (hasInteractive) {
+          z += 2.10;
+        }
+
+        if (hasDirectBuildWrite) z -= 0.6;
+        if (isStaticName) z -= 1.4;
+
+        p = 1 / (1 + Math.exp(-Math.max(-20, Math.min(20, z))));
+        p = Math.max(0.05, Math.min(0.95, p));
+      }
+
+      answers.is_ui_state = { type: "noul", noul: p };
+      answers.intended_static = { type: "noul", noul: 1 - p };
       answers.verdict = choiceAnswer({
         desync_bug: p,
-        intentionally_non_reactive: staticName ? 0.3 : 0.08,
-        not_user_visible: staticName ? 0.15 : 0.04,
-        insufficient_context: Math.max(0, 1 - p - (staticName ? 0.45 : 0.12)),
+        intentionally_non_reactive: (1 - p) * 0.7,
+        not_user_visible: (1 - p) * 0.2,
+        insufficient_context: (1 - p) * 0.1,
       });
     } else if (s.rule === "R3") {
       const appScoped = typeof cand.resource === "string" && /AppStorage|globalThis|ability|Application/i.test(cand.resource);
