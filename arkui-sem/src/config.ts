@@ -141,7 +141,7 @@ export function loadSettings(options: Record<string, unknown> = {}, projectDir: 
       openrouterApiKey: first(o.openrouter?.apiKey, env("OPENROUTER_API_KEY"), project.openrouter?.apiKey, user.openrouter?.apiKey),
       openrouterBaseUrl: first(o.openrouter?.baseUrl, env("OPENROUTER_BASE_URL"), project.openrouter?.baseUrl, user.openrouter?.baseUrl),
       lmstudioBaseUrl: first(o.lmstudio?.baseUrl, env("ARKUI_SEM_LMSTUDIO_BASE_URL"), env("LMSTUDIO_BASE_URL"), project.lmstudio?.baseUrl, user.lmstudio?.baseUrl),
-      lmstudioModel: first(o.lmstudio?.model, env("ARKUI_SEM_LMSTUDIO_MODEL"), env("LMSTUDIO_MODEL"), project.lmstudio?.model, user.lmstudio?.model),
+      lmstudioModel: first(o.lmstudio?.model, env("ARKUI_SEM_LMSTUDIO_MODEL"), env("LMSTUDIO_MODEL"), project.lmstudio?.model, user.lmstudio?.model) ?? "text-embedding-embeddinggemma-2",
       lmstudioApiKey: first(o.lmstudio?.apiKey, env("ARKUI_SEM_LMSTUDIO_API_KEY"), env("LMSTUDIO_API_KEY"), project.lmstudio?.apiKey, user.lmstudio?.apiKey),
     },
     sources,
