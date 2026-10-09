@@ -2,6 +2,7 @@
 import { choice, type ChoiceResponse, type EntryType, type JsonValue, noul, type NoulResponse, type Question, type Questions, score, type ScoreResponse, TypeSafeClient } from "@typesafe-ai/sdk";
 import { type Candidate, type FileFacts, nestedDepth } from "./analysis.js";
 import { CANONICAL_PATTERNS, cosineSimilarity, describePatternForEmbedding } from "./antipatterns.js";
+import { CODE_EXEMPLARS } from "./exemplars.js";
 import type { Credentials } from "./config.js";
 
 // --- System One interface, Jev, Clef ---
@@ -506,7 +507,7 @@ export class EmbeddingAntiPatternBackend implements SystemOneBackend {
   private readonly baseURL: string;
   private readonly model?: string;
   private readonly apiKey?: string;
-  private patternEmbeddings: Map<string, number[]> = new Map();
+  private exemplarEmbeddings: Map<string, number[]> = new Map();
 
   constructor(opts: EmbeddingBackendOptions = {}) {
     this.baseURL = (opts.baseUrl ?? process.env.LMSTUDIO_BASE_URL ?? "http://127.0.0.1:1234/v1").replace(/\/+$/, "");
@@ -532,45 +533,54 @@ export class EmbeddingAntiPatternBackend implements SystemOneBackend {
     return data.data[0].embedding;
   }
 
-  private async ensurePatternEmbeddings(): Promise<void> {
-    if (this.patternEmbeddings.size > 0) return;
-    for (const p of CANONICAL_PATTERNS) {
-      const emb = await this.embed(describePatternForEmbedding(p));
-      this.patternEmbeddings.set(p.id, emb);
+  private async ensureExemplarEmbeddings(): Promise<void> {
+    if (this.exemplarEmbeddings.size > 0) return;
+    for (const item of CODE_EXEMPLARS) {
+      const emb = await this.embed(item.code);
+      this.exemplarEmbeddings.set(item.id, emb);
     }
   }
 
   async systemOne(state: EntryType, questions: Questions): Promise<Result> {
     validateQuestions(questions);
     const t0 = performance.now();
-    await this.ensurePatternEmbeddings();
+    await this.ensureExemplarEmbeddings();
 
     const s = (typeof state === "object" && state !== null && !Array.isArray(state) ? state : {}) as Record<string, any>;
     const cand = s.candidate ?? {};
     const excerpts = Array.isArray(s.excerpts) ? s.excerpts.join("\n") : "";
-    const candidateText = `Rule: ${s.rule}\nComponent: ${s.component}\nCandidate: ${JSON.stringify(cand)}\nCode excerpts:\n${excerpts}`;
+    const candidateCode = excerpts.trim().length > 0
+      ? `// Component: ${s.component}\n${excerpts}`
+      : `// Rule: ${s.rule}\n// Component: ${s.component}\n${JSON.stringify(cand)}`;
 
-    const candidateEmb = await this.embed(candidateText);
+    const candidateEmb = await this.embed(candidateCode);
 
-    let maxBugSim = -1;
-    let maxBenignSim = -1;
-    for (const p of CANONICAL_PATTERNS) {
-      const pEmb = this.patternEmbeddings.get(p.id);
-      if (!pEmb) continue;
-      const sim = cosineSimilarity(candidateEmb, pEmb);
-      if (p.category === "bug" && p.rule === s.rule) {
-        if (sim > maxBugSim) maxBugSim = sim;
-      } else if (p.category === "benign") {
-        if (sim > maxBenignSim) maxBenignSim = sim;
+    // Filter exemplars matching the rule (R1 or R3)
+    const pool = CODE_EXEMPLARS.filter((e) => e.rule === s.rule);
+    const scored = pool
+      .map((e) => ({
+        exemplar: e,
+        sim: cosineSimilarity(candidateEmb, this.exemplarEmbeddings.get(e.id) ?? []),
+      }))
+      .sort((a, b) => b.sim - a.sim);
+
+    // k-NN: pick top k = 3 nearest code exemplars
+    const k = 3;
+    const topK = scored.slice(0, k);
+
+    // Temperature-weighted voting over top-k neighbors
+    const tau = 0.1;
+    let bugWeight = 0;
+    let totalWeight = 0;
+    for (const item of topK) {
+      const w = Math.exp(item.sim / tau);
+      totalWeight += w;
+      if (item.exemplar.label === "bug") {
+        bugWeight += w;
       }
     }
 
-    if (maxBugSim < 0) maxBugSim = 0.5;
-    if (maxBenignSim < 0) maxBenignSim = 0.5;
-
-    // Contrastive score between bug and benign patterns
-    const diff = maxBugSim - maxBenignSim;
-    const pBug = 1 / (1 + Math.exp(-diff * 8)); // sigmoid with temperature scaling
+    const pBug = totalWeight > 0 ? Math.min(0.95, Math.max(0.05, bugWeight / totalWeight)) : 0.5;
 
     const answers: Record<string, Answer> = {};
     if (s.rule === "R1") {
