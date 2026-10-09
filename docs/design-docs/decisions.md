@@ -9,7 +9,8 @@
 - **Decorator prediction dropped** (2026-10-08): no decorator-choice model runs, no large-LLM comparison on that task; the MDP datasets now supply items for the judge questions R1–R3.
 - **Later:** an ArkAnalyzer extractor behind the `FactExtractor` interface; then re-run on the union of candidates.
 - **Repos: this repo is public, the bench is a private submodule** (2026-10-08).
-  - GitHub's free organization plan gives branch protection (required reviews, rulesets) only to public repos, so the code lives in the public repo, where those gates work. CI is not set up yet.
+  - GitHub's free organization plan gives branch protection (required reviews, rulesets) only to public repos, so the code lives in the public repo, where those gates work.
+  - CI (2026-10-09): offline only (the `test` check: build and tests). No bench and no keys, so public CI never needs private access; live model calls and bench runs stay manual. The ruleset requires the check next to one approval.
   - `bench/` is the private repo `arkui-sem-bench`, a git submodule (relative URL `../arkui-sem-bench.git`). It holds the datasets, runs, results, the eval scripts and the evaluation docs. Public clones work without it.
   - The bench needs no gates of its own: it holds experiments, and code shared with the linter lives here.
   - Ignored here: `refs/`, and everything in `sandbox/` except the demo project `sandbox/demo/` (2026-10-08: one demo project with the R1 pages; the R3 fixture and the separate copies were dropped).

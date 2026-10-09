@@ -1,0 +1,27 @@
+name: test
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      # Without submodules: the bench is private, and the public checks must not need it.
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: arkui-sem/package-lock.json
+      - run: npm ci
+        working-directory: arkui-sem
+      - run: npm test
+        working-directory: arkui-sem
+        env:
+          ARKUI_SEM_CONFIG: /nonexistent

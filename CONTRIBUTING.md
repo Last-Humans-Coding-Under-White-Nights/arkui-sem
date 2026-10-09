@@ -47,8 +47,10 @@ repo. Update the `bench` pointer in this repo only when the public side needs a 
 ## Making a change
 
 1. Branch from `main` and commit the way you normally do.
-2. Run the offline tests (`cd arkui-sem && npm test`) and open a pull request.
-3. Push more commits during review. Merge when a reviewer approved.
+2. Run the offline tests (`cd arkui-sem && npm test`) and open a pull request. GitHub pre-fills the description with
+   three short sections (what and why, how it was checked, notes); a few plain lines each is enough.
+3. CI runs the same tests on the PR (the `test` check). Push more commits during review. Merge when a reviewer
+   approved and the check is green.
 
 **This repo is public.** Keep bench data out of code, docs, commit messages and PR text: no dataset paths or ids,
 no numbers from runs, no code from private projects. Point to a bench file by its path (`bench/docs/...`) if you

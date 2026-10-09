@@ -37,7 +37,8 @@ This file is the map for every coding agent (opencode and Codex read `AGENTS.md`
 
 ## Git workflow
 
-- Branch, open a PR, merge when a reviewer approved and the offline tests pass (`npm test` in `arkui-sem/`). Commit messages and PRs here are public.
+- Branch, open a PR, merge when a reviewer approved and the `test` check passed (CI runs the offline tests, `npm test` in `arkui-sem/`, on every PR). Commit messages and PRs here are public.
+- PR descriptions follow `.github/pull_request_template.md` (`gh pr create` doesn't load it: fill in its sections, drop the comments, pass the result with `--body-file`): a few plain lines per section, no file lists or restated code.
 - Bench changes are committed and pushed inside `bench/` (its own repo). Bump the `bench` pointer here only when the public side needs a specific bench version.
 - Commit linter changes before a bench run, so run records name a real linter version (`tree:<hash>` of `arkui-sem/`).
 
