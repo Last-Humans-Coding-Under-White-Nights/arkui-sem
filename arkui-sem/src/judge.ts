@@ -1,6 +1,7 @@
 // Decision models: questions, spec cards, slices, and backends that answer in one TypeSafe-shaped format.
 import { choice, type ChoiceResponse, type EntryType, type JsonValue, noul, type NoulResponse, type Question, type Questions, score, type ScoreResponse, TypeSafeClient } from "@typesafe-ai/sdk";
 import { type Candidate, type FileFacts, nestedDepth } from "./analysis.js";
+import { CANONICAL_PATTERNS, cosineSimilarity, describePatternForEmbedding } from "./antipatterns.js";
 import type { Credentials } from "./config.js";
 
 // --- System One interface, Jev, Clef ---
@@ -492,11 +493,126 @@ export class DeepSeekBackend implements SystemOneBackend {
 
 }
 
+// --- Embedding Anti-pattern backend ---
+
+export interface EmbeddingBackendOptions {
+  baseUrl?: string;
+  model?: string;
+  apiKey?: string;
+}
+
+export class EmbeddingAntiPatternBackend implements SystemOneBackend {
+  readonly name = "embedding-antipattern";
+  private readonly baseURL: string;
+  private readonly model?: string;
+  private readonly apiKey?: string;
+  private patternEmbeddings: Map<string, number[]> = new Map();
+
+  constructor(opts: EmbeddingBackendOptions = {}) {
+    this.baseURL = (opts.baseUrl ?? process.env.LMSTUDIO_BASE_URL ?? "http://127.0.0.1:1234/v1").replace(/\/+$/, "");
+    this.model = opts.model ?? process.env.LMSTUDIO_MODEL;
+    this.apiKey = opts.apiKey ?? process.env.LMSTUDIO_API_KEY;
+  }
+
+  private async embed(text: string): Promise<number[]> {
+    const res = await fetch(`${this.baseURL}/embeddings`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(this.apiKey ? { Authorization: `Bearer ${this.apiKey}` } : {}),
+      },
+      body: JSON.stringify({
+        input: text,
+        ...(this.model ? { model: this.model } : {}),
+      }),
+    });
+    if (!res.ok) throw new Error(`Embedding request failed HTTP ${res.status}: ${(await res.text()).slice(0, 300)}`);
+    const data = (await res.json()) as { data: Array<{ embedding: number[] }> };
+    if (!data?.data?.[0]?.embedding) throw new Error("Invalid response from embedding API: missing data[0].embedding");
+    return data.data[0].embedding;
+  }
+
+  private async ensurePatternEmbeddings(): Promise<void> {
+    if (this.patternEmbeddings.size > 0) return;
+    for (const p of CANONICAL_PATTERNS) {
+      const emb = await this.embed(describePatternForEmbedding(p));
+      this.patternEmbeddings.set(p.id, emb);
+    }
+  }
+
+  async systemOne(state: EntryType, questions: Questions): Promise<Result> {
+    validateQuestions(questions);
+    const t0 = performance.now();
+    await this.ensurePatternEmbeddings();
+
+    const s = (typeof state === "object" && state !== null && !Array.isArray(state) ? state : {}) as Record<string, any>;
+    const cand = s.candidate ?? {};
+    const excerpts = Array.isArray(s.excerpts) ? s.excerpts.join("\n") : "";
+    const candidateText = `Rule: ${s.rule}\nComponent: ${s.component}\nCandidate: ${JSON.stringify(cand)}\nCode excerpts:\n${excerpts}`;
+
+    const candidateEmb = await this.embed(candidateText);
+
+    let maxBugSim = -1;
+    let maxBenignSim = -1;
+    for (const p of CANONICAL_PATTERNS) {
+      const pEmb = this.patternEmbeddings.get(p.id);
+      if (!pEmb) continue;
+      const sim = cosineSimilarity(candidateEmb, pEmb);
+      if (p.category === "bug" && p.rule === s.rule) {
+        if (sim > maxBugSim) maxBugSim = sim;
+      } else if (p.category === "benign") {
+        if (sim > maxBenignSim) maxBenignSim = sim;
+      }
+    }
+
+    if (maxBugSim < 0) maxBugSim = 0.5;
+    if (maxBenignSim < 0) maxBenignSim = 0.5;
+
+    // Contrastive score between bug and benign patterns
+    const diff = maxBugSim - maxBenignSim;
+    const pBug = 1 / (1 + Math.exp(-diff * 8)); // sigmoid with temperature scaling
+
+    const answers: Record<string, Answer> = {};
+    if (s.rule === "R1") {
+      answers.is_ui_state = { type: "noul", noul: pBug };
+      answers.intended_static = { type: "noul", noul: 1 - pBug };
+      answers.verdict = toAnswer(questions.verdict, {
+        desync_bug: pBug,
+        intentionally_non_reactive: (1 - pBug) * 0.7,
+        not_user_visible: (1 - pBug) * 0.2,
+        insufficient_context: (1 - pBug) * 0.1,
+      });
+    } else if (s.rule === "R3") {
+      answers.app_lifetime = { type: "noul", noul: 1 - pBug };
+      answers.released_elsewhere = { type: "noul", noul: 0.1 };
+      answers.verdict = toAnswer(questions.verdict, {
+        leak_bug: pBug,
+        intentionally_persistent: (1 - pBug) * 0.8,
+        released_elsewhere: (1 - pBug) * 0.1,
+        insufficient_context: (1 - pBug) * 0.1,
+      });
+    }
+
+    for (const [id, q] of Object.entries(questions)) {
+      if (answers[id]) continue;
+      if (q.type === "noul") answers[id] = { type: "noul", noul: 0.5 };
+      else if (q.type === "choice") {
+        const labels = Object.keys(q.criteria);
+        answers[id] = toAnswer(q, Object.fromEntries(labels.map((l) => [l, 1 / labels.length])));
+      } else {
+        answers[id] = toAnswer(q, Object.fromEntries(q.criteria.map((_, i) => [String(i), 1 / q.criteria.length])));
+      }
+    }
+
+    return { backend: this.name, answers, latencyMs: performance.now() - t0 };
+  }
+}
+
 // --- Backend registry ---
 
 export const BACKENDS = [
   "heuristic", "jev", "laya", "clef", "clef-flash", "or-clef", "or-clef-flash",
-  "deepseek-flash",
+  "deepseek-flash", "embedding-antipattern", "embedding",
 ] as const;
 export type BackendName = (typeof BACKENDS)[number];
 
@@ -516,6 +632,13 @@ export async function createBackend(name: string, creds: Credentials = {}): Prom
       return new OpenRouterClefBackend(name === "or-clef" ? "cloudflare/clef" : "cloudflare/clef-flash", { apiKey: creds.openrouterApiKey, baseUrl: creds.openrouterBaseUrl });
     case "deepseek-flash":
       return new DeepSeekBackend({ apiKey: creds.deepseekApiKey, baseUrl: creds.deepseekBaseUrl });
+    case "embedding-antipattern":
+    case "embedding":
+      return new EmbeddingAntiPatternBackend({
+        baseUrl: creds.lmstudioBaseUrl,
+        model: creds.lmstudioModel,
+        apiKey: creds.lmstudioApiKey,
+      });
     default:
       throw new Error(`Unknown backend "${name}". Expected one of: ${BACKENDS.join(", ")}`);
   }

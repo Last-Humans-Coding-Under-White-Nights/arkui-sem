@@ -44,6 +44,7 @@ node dist/cli.js config [--init]           # prints masked key fragments
 | `jev` | TypeSafe Jev |
 | `deepseek-flash` | DeepSeek flash with structured output |
 | `laya` | a local TypeSafe-compatible server (`laya.baseUrl`, default `http://127.0.0.1:8080`) |
+| `embedding-antipattern` (`embedding`) | local OpenAI-compatible embedding server (e.g. LM Studio with EmbeddingGemma2, default `http://127.0.0.1:1234/v1`) |
 | `heuristic` | offline rules, no model; used by the tests |
 
 Any backend can be tried on your own files: `node dist/cli.js check <file.ets> --backend <name>`.

@@ -14,6 +14,9 @@ export interface Credentials {
   cloudflareApiToken?: string;
   openrouterApiKey?: string;
   openrouterBaseUrl?: string;
+  lmstudioBaseUrl?: string;
+  lmstudioModel?: string;
+  lmstudioApiKey?: string;
 }
 
 export interface Settings {
@@ -40,6 +43,7 @@ export interface ConfigFile {
   laya?: { baseUrl?: string; model?: string };
   cloudflare?: { accountId?: string; apiToken?: string };
   openrouter?: { apiKey?: string; baseUrl?: string };
+  lmstudio?: { baseUrl?: string; model?: string; apiKey?: string };
 }
 
 const SCHEMA: Record<string, "string" | "boolean" | "number" | Record<string, "string">> = {
@@ -55,8 +59,9 @@ const SCHEMA: Record<string, "string" | "boolean" | "number" | Record<string, "s
   laya: { baseUrl: "string", model: "string" },
   cloudflare: { accountId: "string", apiToken: "string" },
   openrouter: { apiKey: "string", baseUrl: "string" },
+  lmstudio: { baseUrl: "string", model: "string", apiKey: "string" },
 };
-const SECRET_KEYS = new Set(["deepseek.apiKey", "typesafe.apiKey", "cloudflare.apiToken", "openrouter.apiKey"]);
+const SECRET_KEYS = new Set(["deepseek.apiKey", "typesafe.apiKey", "cloudflare.apiToken", "openrouter.apiKey", "lmstudio.apiKey"]);
 
 export const userConfigPath = () => process.env.ARKUI_SEM_CONFIG ?? join(homedir(), ".config", "arkui-sem", "config.json");
 export const projectConfigPath = (projectDir: string) => join(projectDir, ".opencode", "arkui-sem.json");
@@ -135,6 +140,9 @@ export function loadSettings(options: Record<string, unknown> = {}, projectDir: 
       cloudflareApiToken: first(o.cloudflare?.apiToken, env("CLOUDFLARE_API_TOKEN"), project.cloudflare?.apiToken, user.cloudflare?.apiToken),
       openrouterApiKey: first(o.openrouter?.apiKey, env("OPENROUTER_API_KEY"), project.openrouter?.apiKey, user.openrouter?.apiKey),
       openrouterBaseUrl: first(o.openrouter?.baseUrl, env("OPENROUTER_BASE_URL"), project.openrouter?.baseUrl, user.openrouter?.baseUrl),
+      lmstudioBaseUrl: first(o.lmstudio?.baseUrl, env("ARKUI_SEM_LMSTUDIO_BASE_URL"), env("LMSTUDIO_BASE_URL"), project.lmstudio?.baseUrl, user.lmstudio?.baseUrl),
+      lmstudioModel: first(o.lmstudio?.model, env("ARKUI_SEM_LMSTUDIO_MODEL"), env("LMSTUDIO_MODEL"), project.lmstudio?.model, user.lmstudio?.model),
+      lmstudioApiKey: first(o.lmstudio?.apiKey, env("ARKUI_SEM_LMSTUDIO_API_KEY"), env("LMSTUDIO_API_KEY"), project.lmstudio?.apiKey, user.lmstudio?.apiKey),
     },
     sources,
     warnings,
@@ -156,6 +164,7 @@ export function describeSettings(s: Settings): Record<string, unknown> {
       layaBaseUrl: c.layaBaseUrl, layaModel: c.layaModel,
       cloudflareAccountId: c.cloudflareAccountId, cloudflareApiToken: mask(c.cloudflareApiToken),
       openrouterApiKey: mask(c.openrouterApiKey), openrouterBaseUrl: c.openrouterBaseUrl,
+      lmstudioBaseUrl: c.lmstudioBaseUrl, lmstudioModel: c.lmstudioModel, lmstudioApiKey: mask(c.lmstudioApiKey),
     },
     sources: s.sources, warnings: s.warnings,
   };

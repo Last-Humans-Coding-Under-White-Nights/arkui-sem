@@ -460,3 +460,53 @@ console.log(`\n${passed} passed; plugin logs: ${logs.map((l) => `${l.level}: ${l
   srv.close();
   console.log("ok openrouter clef backend");
 }
+
+// --- Embedding Anti-pattern Backend ---
+{
+  const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+  const { cosineSimilarity, CANONICAL_PATTERNS } = await import(pathToFileURL(join(root, "dist", "antipatterns.js")).href);
+  const { createBackend, Q_R1 } = await import(pathToFileURL(join(root, "dist", "judge.js")).href);
+
+  assert.equal(cosineSimilarity([1, 0], [1, 0]), 1);
+  assert.equal(cosineSimilarity([1, 0], [0, 1]), 0);
+  assert.equal(cosineSimilarity([1, 0], [-1, 0]), -1);
+  assert.ok(CANONICAL_PATTERNS.length >= 4);
+
+  const seen = [];
+  const srv = createServer(async (req, res) => {
+    let raw = "";
+    for await (const chunk of req) raw += chunk;
+    const body = JSON.parse(raw);
+    seen.push({ url: req.url, body });
+    const text = body.input || "";
+    const isNested = /nested/i.test(text);
+    const isBookkeeping = /bookkeeping|cache/i.test(text);
+    const emb = isNested ? [0.9, 0.1, 0.0] : isBookkeeping ? [0.0, 0.1, 0.9] : [0.5, 0.5, 0.5];
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ data: [{ embedding: emb, index: 0 }] }));
+  });
+  await new Promise((r) => srv.listen(0, "127.0.0.1", r));
+  const baseUrl = `http://127.0.0.1:${srv.address().port}/v1`;
+
+  const backend = await createBackend("embedding-antipattern", { lmstudioBaseUrl: baseUrl });
+  assert.equal(backend.name, "embedding-antipattern");
+
+  const state = {
+    rule: "R1",
+    component: "ProfileCard",
+    candidate: { kind: "nested-write-unobserved", field: "profile" },
+    excerpts: ["this.profile.settings.nickname = 'New'"],
+  };
+
+  const res = await backend.systemOne(state, Q_R1);
+  assert.ok(res.answers.verdict.probabilities.desync_bug > 0.5);
+  assert.ok(res.answers.is_ui_state.noul > 0.5);
+  assert.equal(res.backend, "embedding-antipattern");
+
+  // Alias "embedding"
+  const backendAlias = await createBackend("embedding", { lmstudioBaseUrl: baseUrl });
+  assert.equal(backendAlias.name, "embedding-antipattern");
+
+  srv.close();
+  console.log("ok embedding anti-pattern backend");
+}
