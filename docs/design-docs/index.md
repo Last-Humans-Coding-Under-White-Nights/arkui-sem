@@ -3,6 +3,7 @@
 | Doc | Status | What it holds |
 |---|---|---|
 | [decisions.md](decisions.md) | current | decisions made, with dates: judge chain, scope, repos, docs |
+| [regressor-derivation-methodology.md](regressor-derivation-methodology.md) | current | detailed methodology paper: mathematical formulation, feature engineering, and cross-dataset validation of the AST Logistic Regressor v3 |
 | [ast-logistic-hybrid.md](ast-logistic-hybrid.md) | current | why dense code embeddings fail on ArkUI reactivity (AUC 0.50) and how Calibrated AST Logistic Regression v3 solves it (AUC 0.81, 0ms) |
 | [core-beliefs.md](core-beliefs.md) | current (condensed from the 2026-10-05 deep dive) | ArkTS tooling, decidability ladder (Rung 0–3), deep architecture, evaluation hygiene, risks |
 | [agentic-plugin.md](agentic-plugin.md) | current | opencode plugin architecture, agent-first evaluation, risks of the agent loop |
