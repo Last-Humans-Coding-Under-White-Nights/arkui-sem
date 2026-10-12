@@ -14,6 +14,8 @@ export interface WriteFact {
   method: string;
   /** Property path below the field for in-place mutation ("title", "items[]"); absent for reassignment. */
   nestedPath?: string;
+  /** The writing method is reached neither from build()/@Builder nor from lifecycle hooks: other code calls it. */
+  external?: boolean;
 }
 
 export interface FieldFact {
@@ -145,6 +147,37 @@ function blank(text: string): string {
 
 const count = (s: string, ch: string) => s.split(ch).length - 1;
 
+/**
+ * Methods no code in the component reaches from build()/@Builder (calls or `this.m` references, e.g. `.onClick(this.m)`)
+ * or from lifecycle hooks (calls): entry points for listeners, callbacks and other classes.
+ */
+function externalMethods(methods: Method[], code: string[]): Set<string> {
+  const names = new Set(methods.map((m) => m.name));
+  const edges = new Map(methods.map((m) => {
+    const calls = new Set<string>(), refs = new Set<string>();
+    for (let i = m.firstLine; i <= m.lastLine; i++) {
+      for (const h of code[i].matchAll(/this\.(\w+)(\s*\()?/g)) {
+        if (names.has(h[1]) && h[1] !== m.name) (h[2] ? calls : refs).add(h[1]);
+      }
+    }
+    return [m.name, { calls, refs }] as const;
+  }));
+  const reach = (roots: string[], viaRefs: boolean) => {
+    const seen = new Set(roots), todo = [...roots];
+    while (todo.length) {
+      const e = edges.get(todo.pop()!)!;
+      for (const n of [...e.calls, ...(viaRefs ? e.refs : [])]) {
+        if (!seen.has(n) && !LIFECYCLE.has(n)) { seen.add(n); todo.push(n); }
+      }
+    }
+    return seen;
+  };
+  const roots = (f: (m: Method) => boolean) => methods.filter(f).map((m) => m.name);
+  const fromBuild = reach(roots((m) => m.name === "build" || m.decorators.includes("@Builder")), true);
+  const fromLifecycle = reach(roots((m) => LIFECYCLE.has(m.name)), false);
+  return new Set([...names].filter((n) => !LIFECYCLE.has(n) && !fromBuild.has(n) && !fromLifecycle.has(n)));
+}
+
 interface Method {
   name: string;
   decorators: string[];
@@ -245,6 +278,8 @@ export class NaiveExtractor implements FactExtractor {
 
     const byName = new Map(fields.map((f) => [f.name, f]));
     for (const m of methods) this.scanMethod(m, code, byName);
+    const external = externalMethods(methods, code);
+    for (const f of fields) for (const w of f.writes) w.external = external.has(w.method);
 
     return { name, file, line: start + 1, version, fields, resources: this.resources(methods, raw) };
   }

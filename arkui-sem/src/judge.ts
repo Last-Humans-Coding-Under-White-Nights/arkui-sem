@@ -288,6 +288,7 @@ export function buildSlice(facts: FileFacts, c: Candidate, taskContext?: string,
       reads_in_build: f.readsInBuild.length,
       writes: f.writes.slice(0, 5).map((w) => ({
         line: w.line, context: w.context, method: w.method, nested_path: w.nestedPath ?? null, nested_depth: nestedDepth(w.nestedPath),
+        external: w.external ?? false,
       })),
       type_is_observed_class: typeName ? facts.observedClasses.includes(typeName) : null,
       type_is_observed_v2_class: typeName ? facts.observedV2Classes.includes(typeName) : null,
@@ -341,16 +342,10 @@ export class HeuristicBackend implements SystemOneBackend {
         p = 0.05;
       } else {
         const contexts = writes.map((w: any) => w.context);
-        const methods = writes.map((w: any) => w.method).filter(Boolean);
 
         const onlyLifecycle = contexts.length > 0 && contexts.every((c: string) => c === "lifecycle");
-        const allInitHelpers =
-          methods.length > 0 &&
-          methods.every((m: string) => /^init|^calculate|^compute|^setup|^processUiExtNode|Init$/i.test(m));
-        const hasEventHandler =
-          methods.some((m: string) => /^on|^handle|Click|Change|Touch|Select|Update|Toggle|Drag|Hover|Gesture|Key|Mouse/i.test(m)) ||
-          contexts.some((c: string) => c === "build-closure");
-        const hasDirectBuildWrite = contexts.some((c: string) => c === "build");
+        // Written in a build() closure, or in a method other code calls (listener, callback): the UI must re-render.
+        const hasEventHandler = contexts.some((c: string) => c === "build-closure") || writes.some((w: any) => w.external);
         const hasNestedMutation = writes.some((w: any) => (w.nested_depth ?? 0) > 0);
 
         let z = 1.05;
@@ -361,8 +356,7 @@ export class HeuristicBackend implements SystemOneBackend {
         else if (/\[\]|Array</i.test(type)) z -= 0.4;
 
         if (hasEventHandler) z += 1.6;
-        if (onlyLifecycle || allInitHelpers) z -= 1.8;
-        if (hasDirectBuildWrite) z -= 0.8;
+        if (onlyLifecycle) z -= 1.8;
         if (hasNestedMutation) z -= 0.7;
         if (writes.length > 1) z += 0.3;
         if (writes.length > 3) z += 0.7;
