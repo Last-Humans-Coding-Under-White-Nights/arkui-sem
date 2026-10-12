@@ -332,17 +332,12 @@ export class HeuristicBackend implements SystemOneBackend {
     const answers: Record<string, Answer> = {};
 
     if (s.rule === "R1") {
-      const field = typeof cand.field === "string" ? cand.field : "";
       const type = typeof cand.type === "string" ? cand.type : "";
       const writes = Array.isArray(cand.writes) ? cand.writes : [];
-
-      // 1. Controller / ViewModel / Manager / Service hard filter
-      const isControllerOrModel =
-        /Controller|Scroller|Context|Worker|Mutex|Client|Reporter|ViewModel|Manager|Service/i.test(type) ||
-        /Controller|Scroller|Context|Worker|Mutex|Client|Reporter|ViewModel|Manager|Service/i.test(field);
+      const excerpts = Array.isArray(s.excerpts) ? s.excerpts : [];
 
       let p = 0.55;
-      if (isControllerOrModel) {
+      if (/Controller|Scroller/i.test(type)) {
         p = 0.05;
       } else {
         const contexts = writes.map((w: any) => w.context);
@@ -352,23 +347,34 @@ export class HeuristicBackend implements SystemOneBackend {
         const allInitHelpers =
           methods.length > 0 &&
           methods.every((m: string) => /^init|^calculate|^compute|^setup|^processUiExtNode|Init$/i.test(m));
-        const hasInteractive = contexts.some((c: string) => c === "method" || c === "async-callback" || c === "build-closure");
+        const hasEventHandler =
+          methods.some((m: string) => /^on|^handle|Click|Change|Touch|Select|Update|Toggle|Drag|Hover|Gesture|Key|Mouse/i.test(m)) ||
+          contexts.some((c: string) => c === "build-closure");
         const hasDirectBuildWrite = contexts.some((c: string) => c === "build");
-        const isStaticName =
-          /(?:debug|log|trace|cache|tmp|temp|prev|last|timer|handle|controller|listener|config|style)|(?:Id|Ms|Ts|At|Flag|Config|Style)$/i.test(
-            field,
-          ) && !/^item|^items/i.test(field);
+        const hasNestedMutation = writes.some((w: any) => (w.nested_depth ?? 0) > 0);
 
-        // Calibrated logistic regression formula (v3 model)
-        let z = -0.30;
-        if (onlyLifecycle || allInitHelpers) {
-          z -= 2.0;
-        } else if (hasInteractive) {
-          z += 2.10;
+        let z = 1.05;
+
+        if (/boolean/i.test(type)) z += 0.7;
+        else if (/number/i.test(type)) z += 0.7;
+        else if (/string/i.test(type)) z -= 0.6;
+        else if (/\[\]|Array</i.test(type)) z -= 0.4;
+
+        if (hasEventHandler) z += 1.6;
+        if (onlyLifecycle || allInitHelpers) z -= 1.8;
+        if (hasDirectBuildWrite) z -= 0.8;
+        if (hasNestedMutation) z -= 0.7;
+        if (writes.length > 1) z += 0.3;
+        if (writes.length > 3) z += 0.7;
+
+        if (excerpts.some((e: string) => /ForEach\s*\(/i.test(e))) z += 1.8;
+        if (excerpts.some((e: string) => /\.(visibility|opacity)\s*\(/i.test(e))) z += 1.4;
+        if (excerpts.some((e: string) => /\.(scale|rotate|translate)\s*\(/i.test(e))) z += 0.6;
+        if (excerpts.some((e: string) => /\.(color|backgroundColor|fontColor|enabled)\s*\(/i.test(e))) z += 0.6;
+
+        if (excerpts.some((e: string) => /Date\.now\(\)|performance\.now\(\)|new Date\(\)|setTimeout|setInterval/.test(e))) {
+          z -= 1.4;
         }
-
-        if (hasDirectBuildWrite) z -= 0.6;
-        if (isStaticName) z -= 1.4;
 
         p = 1 / (1 + Math.exp(-Math.max(-20, Math.min(20, z))));
         p = Math.max(0.05, Math.min(0.95, p));
