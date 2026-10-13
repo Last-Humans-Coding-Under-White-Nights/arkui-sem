@@ -60,6 +60,8 @@ export interface FileFacts {
   declaredClasses: string[];
   /** Declared field types of the classes in the file: class → field → type text. */
   classFields: Record<string, Record<string, string>>;
+  /** Classes that extend Array<…>: class → element type text and the class's own type parameters. */
+  arrayClasses: Record<string, { element: string; params: string[] }>;
   lines: string[];
 }
 
@@ -240,18 +242,21 @@ export class NaiveExtractor implements FactExtractor {
     }
     const objectLinkTypes = components.flatMap((c) =>
       c.fields.filter((f) => f.decorators.includes("@ObjectLink") && f.type).map((f) => f.type!.replace(/\[\]$/, "").trim()));
-    const classFields = this.classFields(code, depthBefore, depthAfter);
-    return { file, components, observedClasses, observedV2Classes, objectLinkTypes, declaredClasses, classFields, lines: raw };
+    const { classFields, arrayClasses } = this.classes(code, depthBefore, depthAfter);
+    return { file, components, observedClasses, observedV2Classes, objectLinkTypes, declaredClasses, classFields, arrayClasses, lines: raw };
   }
 
-  private classFields(code: string[], depthBefore: number[], depthAfter: (i: number) => number): Record<string, Record<string, string>> {
-    const out: Record<string, Record<string, string>> = {};
+  private classes(code: string[], depthBefore: number[], depthAfter: (i: number) => number): Pick<FileFacts, "classFields" | "arrayClasses"> {
+    const classFields: FileFacts["classFields"] = {};
+    const arrayClasses: FileFacts["arrayClasses"] = {};
     for (let i = 0; i < code.length; i++) {
-      const cm = code[i].match(/\bclass\s+(\w+)/);
+      const cm = code[i].match(/\bclass\s+(\w+)\s*(?:<([^>]*)>)?/);
       if (!cm) continue;
+      const am = code[i].match(/\bextends\s+Array\s*<(.+?)>\s*(?:implements\b[^{]*)?(?:\{|$)/);
+      if (am) arrayClasses[cm[1]] = { element: am[1].trim(), params: (cm[2] ?? "").split(",").map((p) => p.trim().split(/\s/)[0]).filter(Boolean) };
       const classDepth = depthBefore[i];
       const fields: Record<string, string> = {};
-      out[cm[1]] = fields;
+      classFields[cm[1]] = fields;
       if (code[i].includes("{") && depthAfter(i) <= classDepth) continue; // body opens and closes on the header line
       let end = i;
       while (end + 1 < code.length && !(end > i && depthAfter(end) <= classDepth)) {
@@ -262,7 +267,7 @@ export class NaiveExtractor implements FactExtractor {
       }
       i = end;
     }
-    return out;
+    return { classFields, arrayClasses };
   }
 
   private component(
@@ -438,8 +443,19 @@ const segments = (path?: string) => path?.match(/\??\.\w+|\[[^\]]*\]/g) ?? [];
 export const nestedDepth = (path?: string) => segments(path).length;
 
 const nonNull = (t: string) => t.replace(/\s*\|\s*(?:undefined|null)\b/g, "").trim();
-const elementType = (t: string) => (t.match(/^(.+)\[\]$/) ?? t.match(/^Array<(.+)>$/))?.[1].trim();
 const className = (t: string) => nonNull(t).replace(/<.*>$/, "").trim();
+const own = <T>(map: Record<string, T>, key: string): T | undefined => (Object.hasOwn(map, key) ? map[key] : undefined);
+
+/** Element type of X[], Array<X>, or a file class extending Array<…> (its type parameters bound from t's arguments). */
+function elementType(t: string, facts: FileFacts): string | undefined {
+  const builtin = (t.match(/^(.+)\[\]$/) ?? t.match(/^Array<(.+)>$/))?.[1].trim();
+  if (builtin !== undefined) return builtin;
+  const cls = own(facts.arrayClasses, className(t));
+  if (!cls) return undefined;
+  const args = t.match(/<(.+)>$/)?.[1].split(",").map((a) => a.trim()) ?? [];
+  const param = cls.params.indexOf(cls.element);
+  return param < 0 ? cls.element : args[param];
+}
 
 /** Declared type of this.<field><segs>, from the field's type and the file's class fields; undefined when unknown. */
 function typeAt(fieldType: string | undefined, segs: string[], facts: FileFacts): string | undefined {
@@ -447,8 +463,8 @@ function typeAt(fieldType: string | undefined, segs: string[], facts: FileFacts)
   for (const s of segs) {
     if (t === undefined) return undefined;
     const prop = s.match(/^\??\.(\w+)$/)?.[1];
-    const fields = facts.classFields[className(t)];
-    const next = prop === undefined ? elementType(t) : fields && Object.hasOwn(fields, prop) ? fields[prop] : undefined;
+    const fields = own(facts.classFields, className(t));
+    const next = prop === undefined ? elementType(t, facts) : fields && own(fields, prop);
     t = next && nonNull(next);
   }
   return t;
