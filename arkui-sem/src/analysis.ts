@@ -470,14 +470,14 @@ function typeAt(fieldType: string | undefined, segs: string[], facts: FileFacts)
   return t;
 }
 
-/** Whether build() or a @Builder reads this.<field><path> or deeper; any index matches any index. For an array call
- *  ("…[]") only reads of the contents count, so passing the array itself to a child does not. */
+/** Whether build() or a @Builder reads this.<field><path> or deeper; any index matches any index, with or without ?. before
+ *  it. For an array call ("…[]") only reads of the contents count, so passing the array itself to a child does not. */
 function rendersPath(f: FieldFact, path: string, facts: FileFacts): boolean {
   const arrayCall = path.endsWith("[]");
   const tail = segments(arrayCall ? path.slice(0, -2) : path)
-    .map((s) => (s.startsWith("[") ? "\\[[^\\]]*\\]" : "\\??\\." + s.replace(/^\??\./, "")))
+    .map((s) => (s.startsWith("[") ? "(?:\\?\\.)?\\[[^\\]]*\\]" : "\\??\\." + s.replace(/^\??\./, "")))
     .join("");
-  const read = new RegExp(`\\bthis\\.${f.name}${tail}${arrayCall ? "(?:\\[|\\??\\.\\w)" : "(?!\\w)"}`);
+  const read = new RegExp(`\\bthis\\.${f.name}${tail}${arrayCall ? "(?:(?:\\?\\.)?\\[|\\??\\.\\w)" : "(?!\\w)"}`);
   return f.readsInBuild.some((l) => read.test(facts.lines[l - 1] ?? ""));
 }
 

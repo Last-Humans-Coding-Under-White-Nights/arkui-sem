@@ -144,6 +144,8 @@ test("V1: a deep write is seen by a same-file @ObjectLink child of the owning @O
     ["array item", [], ITEM, "@ObjectLink item: Item", "@State items: Array<Item> = []", "ForEach(this.items, (item: Item) => { V({ item: item }) })", "this.items[0].done = true"],
     ["item of an @Observed Array subclass", [], `${ITEM}\n@Observed\nclass ItemList extends Array<Item> {\n}`, "@ObjectLink item: Item", "@State items: ItemList = new ItemList()", "ForEach(this.items, (item: Item) => { V({ item: item }) })", "this.items[0].done = true"],
     ["item of a generic @Observed Array subclass", [], `${ITEM}\n${TAGS}`, "@ObjectLink item: Item", "@State items: ObservedArray<Item> = new ObservedArray<Item>()", "ForEach(this.items, (item: Item) => { V({ item: item }) })", "this.items[0].done = true"],
+    ["parent renders an item through ?.[", ["items"], ITEM, "@ObjectLink item: Item", "@State items: Array<Item> = []", "ForEach(this.items, (item: Item) => { V({ item: item }) })\n      Text(this.items?.[0].done ? 'y' : 'n')", "this.items[0].done = true"],
+    ["parent renders array contents through ?.[", ["user"], TAGS, "@ObjectLink tags: ObservedArray<string>", USER_FIELD, "V({ tags: this.user.tags })\n      Text(this.user.tags?.[0])", "this.user.tags.push('a')"],
     ["@Observed array passed to the child", [], TAGS, "@ObjectLink tags: ObservedArray<string>", USER_FIELD, "V({ tags: this.user.tags })", "this.user.tags.push('a')"],
     ["plain array in a linked object", ["user"], TAGS, "@ObjectLink user: User", USER_FIELD, "V({ user: this.user })", "this.user.plain.push('a')"],
   ];
