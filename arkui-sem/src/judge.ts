@@ -288,6 +288,7 @@ export function buildSlice(facts: FileFacts, c: Candidate, taskContext?: string,
       reads_in_build: f.readsInBuild.length,
       writes: f.writes.slice(0, 5).map((w) => ({
         line: w.line, context: w.context, method: w.method, nested_path: w.nestedPath ?? null, nested_depth: nestedDepth(w.nestedPath),
+        external: w.external ?? false,
       })),
       type_is_observed_class: typeName ? facts.observedClasses.includes(typeName) : null,
       type_is_observed_v2_class: typeName ? facts.observedV2Classes.includes(typeName) : null,
@@ -332,15 +333,54 @@ export class HeuristicBackend implements SystemOneBackend {
     const answers: Record<string, Answer> = {};
 
     if (s.rule === "R1") {
-      const staticName = typeof cand.field === "string" && INTENTIONALLY_STATIC.test(cand.field);
-      const p = cand.kind === "nested-write-unobserved" ? (cand.type_declared_in_file ? 0.85 : 0.6) : staticName ? 0.55 : 0.85;
-      answers.is_ui_state = { type: "noul", noul: staticName ? 0.4 : 0.85 };
-      answers.intended_static = { type: "noul", noul: staticName ? 0.6 : 0.15 };
+      const type = typeof cand.type === "string" ? cand.type : "";
+      const writes = Array.isArray(cand.writes) ? cand.writes : [];
+      const excerpts = Array.isArray(s.excerpts) ? s.excerpts : [];
+
+      let p = 0.55;
+      if (/Controller|Scroller/i.test(type)) {
+        p = 0.05;
+      } else {
+        const contexts = writes.map((w: any) => w.context);
+
+        const onlyLifecycle = contexts.length > 0 && contexts.every((c: string) => c === "lifecycle");
+        // Written in a build() closure, or in a method other code calls (listener, callback): the UI must re-render.
+        const hasEventHandler = contexts.some((c: string) => c === "build-closure") || writes.some((w: any) => w.external);
+        const hasNestedMutation = writes.some((w: any) => (w.nested_depth ?? 0) > 0);
+
+        let z = 1.05;
+
+        if (/\bboolean\b/.test(type)) z += 0.7;
+        else if (/\bnumber\b/.test(type)) z += 0.7;
+        else if (/\bstring\b/.test(type)) z -= 0.6;
+        else if (/\[\]|Array</.test(type)) z -= 0.4;
+
+        if (hasEventHandler) z += 1.6;
+        if (onlyLifecycle) z -= 1.8;
+        if (hasNestedMutation) z -= 0.7;
+        if (writes.length > 1) z += 0.3;
+        if (writes.length > 3) z += 0.7;
+
+        if (excerpts.some((e: string) => /ForEach\s*\(/i.test(e))) z += 1.8;
+        if (excerpts.some((e: string) => /\.(visibility|opacity)\s*\(/i.test(e))) z += 1.4;
+        if (excerpts.some((e: string) => /\.(scale|rotate|translate)\s*\(/i.test(e))) z += 0.6;
+        if (excerpts.some((e: string) => /\.(color|backgroundColor|fontColor|enabled)\s*\(/i.test(e))) z += 0.6;
+
+        if (excerpts.some((e: string) => /Date\.now\(\)|performance\.now\(\)|new Date\(\)|setTimeout|setInterval/.test(e))) {
+          z -= 1.4;
+        }
+
+        p = 1 / (1 + Math.exp(-Math.max(-20, Math.min(20, z))));
+        p = Math.max(0.05, Math.min(0.95, p));
+      }
+
+      answers.is_ui_state = { type: "noul", noul: p };
+      answers.intended_static = { type: "noul", noul: 1 - p };
       answers.verdict = choiceAnswer({
         desync_bug: p,
-        intentionally_non_reactive: staticName ? 0.3 : 0.08,
-        not_user_visible: staticName ? 0.15 : 0.04,
-        insufficient_context: Math.max(0, 1 - p - (staticName ? 0.45 : 0.12)),
+        intentionally_non_reactive: (1 - p) * 0.7,
+        not_user_visible: (1 - p) * 0.2,
+        insufficient_context: (1 - p) * 0.1,
       });
     } else if (s.rule === "R3") {
       const appScoped = typeof cand.resource === "string" && /AppStorage|globalThis|ability|Application/i.test(cand.resource);
