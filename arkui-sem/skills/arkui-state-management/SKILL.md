@@ -43,7 +43,8 @@ Anything registered in `aboutToAppear()` (`emitter.on`, `xxx.on('event', cb)`, `
 - A **finding** (`[R1 …]`, `[R3 …]`) is high-confidence. Apply the suggested fix, or explain why it doesn't apply.
 - A **question** (`[R1?]`, `[R3?]`) means intent is unclear. You know the task, so decide:
   - If the value should update the UI or the resource should be released, apply the fix.
-  - Otherwise add `// arkui-sem-disable-next-line R1 -- <reason>` on the line above.
+  - Otherwise add `// arkui-sem-disable-next-line R1 -- <reason>` on the line above the reported line. For a nested write, put
+    it above each write it lists, or above the field's decorators to accept all writes to that field.
 - Don't silence findings by making everything `@State`. Needless state causes extra re-renders and hides ownership mistakes.
 - Before changing how state flows through a component, call the `arkui_facts` tool on its file to see who reads and writes each field.
 - To check files yourself, call the `arkui_check` tool (optionally with `paths`).

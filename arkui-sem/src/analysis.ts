@@ -16,6 +16,7 @@ export interface WriteFact {
   nestedPath?: string;
   /** The writing method is reached neither from build()/@Builder nor from lifecycle hooks: other code calls it. */
   external?: boolean;
+  disabledRules: string[];
 }
 
 export interface FieldFact {
@@ -57,6 +58,8 @@ export interface FileFacts {
   observedV2Classes: string[];
   objectLinkTypes: string[];
   declaredClasses: string[];
+  /** Declared field types of the classes in the file: class → field → type text. */
+  classFields: Record<string, Record<string, string>>;
   lines: string[];
 }
 
@@ -237,7 +240,29 @@ export class NaiveExtractor implements FactExtractor {
     }
     const objectLinkTypes = components.flatMap((c) =>
       c.fields.filter((f) => f.decorators.includes("@ObjectLink") && f.type).map((f) => f.type!.replace(/\[\]$/, "").trim()));
-    return { file, components, observedClasses, observedV2Classes, objectLinkTypes, declaredClasses, lines: raw };
+    const classFields = this.classFields(code, depthBefore, depthAfter);
+    return { file, components, observedClasses, observedV2Classes, objectLinkTypes, declaredClasses, classFields, lines: raw };
+  }
+
+  private classFields(code: string[], depthBefore: number[], depthAfter: (i: number) => number): Record<string, Record<string, string>> {
+    const out: Record<string, Record<string, string>> = {};
+    for (let i = 0; i < code.length; i++) {
+      const cm = code[i].match(/\bclass\s+(\w+)/);
+      if (!cm) continue;
+      const classDepth = depthBefore[i];
+      const fields: Record<string, string> = {};
+      out[cm[1]] = fields;
+      if (code[i].includes("{") && depthAfter(i) <= classDepth) continue; // body opens and closes on the header line
+      let end = i;
+      while (end + 1 < code.length && !(end > i && depthAfter(end) <= classDepth)) {
+        end++;
+        if (depthBefore[end] !== classDepth + 1) continue;
+        const fm = code[end].replace(/^\s*(?:@\w+(?:\([^)]*\))?\s*)*/, "").match(FIELD);
+        if (fm?.[2]) fields[fm[1]] = fm[2].trim();
+      }
+      i = end;
+    }
+    return out;
   }
 
   private component(
@@ -247,16 +272,23 @@ export class NaiveExtractor implements FactExtractor {
     const fields: FieldFact[] = [];
     const methods: Method[] = [];
     let pending: string[] = [];
+    let pendingStart = -1;
 
     for (let i = start + 1; i < end; i++) {
       if (depthBefore[i] !== structDepth + 1) continue;
       const line = code[i];
       if (line.trim() === "") continue;
-      if (DECORATOR_ONLY.test(line)) { pending.push(...decoratorsOf(line)); continue; }
+      if (DECORATOR_ONLY.test(line)) {
+        if (pending.length === 0) pendingStart = i;
+        pending.push(...decoratorsOf(line));
+        continue;
+      }
 
       const inline = decoratorsOf(line.match(/^\s*(?:@\w+(?:\([^)]*\))?\s*)*/)?.[0] ?? "");
       const rest = line.replace(/^\s*(?:@\w+(?:\([^)]*\))?\s*)*/, "");
       const decorators = [...pending, ...inline];
+      // The disable comment may sit above the decorator lines or directly above the field name.
+      const disabledRules = [...new Set([...disabledRulesAt(raw, i), ...(pending.length ? disabledRulesAt(raw, pendingStart) : [])])];
       pending = [];
 
       const mm = rest.match(METHOD);
@@ -271,20 +303,20 @@ export class NaiveExtractor implements FactExtractor {
       if (fm) {
         fields.push({
           name: fm[1], line: i + 1, decorators, type: fm[2]?.trim(), hasInitializer: fm[3] !== undefined,
-          readsInBuild: [], writes: [], disabledRules: disabledRulesAt(raw, i),
+          readsInBuild: [], writes: [], disabledRules,
         });
       }
     }
 
     const byName = new Map(fields.map((f) => [f.name, f]));
-    for (const m of methods) this.scanMethod(m, code, byName);
+    for (const m of methods) this.scanMethod(m, raw, code, byName);
     const external = externalMethods(methods, code);
     for (const f of fields) for (const w of f.writes) w.external = external.has(w.method);
 
     return { name, file, line: start + 1, version, fields, resources: this.resources(methods, raw) };
   }
 
-  private scanMethod(m: Method, code: string[], fields: Map<string, FieldFact>) {
+  private scanMethod(m: Method, raw: string[], code: string[], fields: Map<string, FieldFact>) {
     const isBuild = m.name === "build" || m.decorators.includes("@Builder");
     for (let i = m.firstLine; i <= m.lastLine; i++) {
       const line = code[i];
@@ -311,7 +343,7 @@ export class NaiveExtractor implements FactExtractor {
           : isBuild ? "build-closure"
           : LIFECYCLE.has(m.name) ? "lifecycle"
           : "method";
-        field.writes.push({ line: i + 1, context, method: m.name, nestedPath: nested || undefined });
+        field.writes.push({ line: i + 1, context, method: m.name, nestedPath: nested || undefined, disabledRules: disabledRulesAt(raw, i) });
       }
     }
   }
@@ -382,6 +414,8 @@ export interface Candidate {
   field?: FieldFact;
   resource?: ResourceFact;
   line: number;
+  /** Nested-write: every unobserved write, in source order. */
+  writes?: WriteFact[];
   /** Stable across runs: dedupe, cache, dismissals. */
   fingerprint: string;
 }
@@ -398,16 +432,58 @@ const isReactive = (f: FieldFact) => f.decorators.some((d) => REACTIVE_V1.has(d)
 const isReactiveV1 = (f: FieldFact) => f.decorators.some((d) => REACTIVE_V1.has(d));
 const baseType = (t?: string) => t?.replace(/\[\]$/, "").replace(/\s*\|\s*(undefined|null)$/, "").trim();
 
-/** Levels below the field a write reaches: ".title" → 1, ".address.city" → 2, "[i].title" → 2, "[]" (array call) → 1. */
-export const nestedDepth = (path?: string) => (path ? (path.match(/\??\.\w+|\[[^\]]*\]/g) ?? []).length : 0);
+const segments = (path?: string) => path?.match(/\??\.\w+|\[[^\]]*\]/g) ?? [];
 
-/** Writes the decorator can't see. V1: deeper than the first layer, even with @Observed classes.
- *  V2: any property write unless the class is @ObservedV2. */
+/** Levels below the field a write reaches: ".title" → 1, ".address.city" → 2, "[i].title" → 2, "[]" (array call) → 1. */
+export const nestedDepth = (path?: string) => segments(path).length;
+
+const nonNull = (t: string) => t.replace(/\s*\|\s*(?:undefined|null)\b/g, "").trim();
+const elementType = (t: string) => (t.match(/^(.+)\[\]$/) ?? t.match(/^Array<(.+)>$/))?.[1].trim();
+const className = (t: string) => nonNull(t).replace(/<.*>$/, "").trim();
+
+/** Declared type of this.<field><segs>, from the field's type and the file's class fields; undefined when unknown. */
+function typeAt(fieldType: string | undefined, segs: string[], facts: FileFacts): string | undefined {
+  let t = fieldType && nonNull(fieldType);
+  for (const s of segs) {
+    if (t === undefined) return undefined;
+    const prop = s.match(/^\??\.(\w+)$/)?.[1];
+    const fields = facts.classFields[className(t)];
+    const next = prop === undefined ? elementType(t) : fields && Object.hasOwn(fields, prop) ? fields[prop] : undefined;
+    t = next && nonNull(next);
+  }
+  return t;
+}
+
+/** Whether build() or a @Builder reads this.<field><path> or deeper; any index matches any index. For an array call
+ *  ("…[]") only reads of the contents count, so passing the array itself to a child does not. */
+function rendersPath(f: FieldFact, path: string, facts: FileFacts): boolean {
+  const arrayCall = path.endsWith("[]");
+  const tail = segments(arrayCall ? path.slice(0, -2) : path)
+    .map((s) => (s.startsWith("[") ? "\\[[^\\]]*\\]" : "\\??\\." + s.replace(/^\??\./, "")))
+    .join("");
+  const read = new RegExp(`\\bthis\\.${f.name}${tail}${arrayCall ? "(?:\\[|\\??\\.\\w)" : "(?!\\w)"}`);
+  return f.readsInBuild.some((l) => read.test(facts.lines[l - 1] ?? ""));
+}
+
+/** V1: a property change on an @Observed object reaches every @ObjectLink bound to that object (OpenHarmony @Observed/@ObjectLink
+ *  docs), so a deep write is seen when a child in the file takes the owning class as @ObjectLink, unless the parent renders the
+ *  path itself. */
+function seenByObjectLink(f: FieldFact, w: WriteFact, facts: FileFacts): boolean {
+  const owner = typeAt(f.type, segments(w.nestedPath).slice(0, -1), facts);
+  if (owner === undefined) return false;
+  const cls = className(owner);
+  return facts.observedClasses.includes(cls) && facts.objectLinkTypes.some((t) => className(t) === cls)
+    && !rendersPath(f, w.nestedPath!, facts);
+}
+
+/** Writes the decorator can't see, minus writes under a disable comment. V1: deeper than the first layer, even with @Observed
+ *  classes, unless an @ObjectLink child sees them. V2: any property write unless the class is @ObservedV2. */
 function unobservedWrites(f: FieldFact, facts: FileFacts) {
-  if (isReactiveV1(f)) return f.writes.filter((w) => nestedDepth(w.nestedPath) >= 2);
+  const writes = f.writes.filter((w) => !w.disabledRules.includes("R1"));
+  if (isReactiveV1(f)) return writes.filter((w) => nestedDepth(w.nestedPath) >= 2 && !seenByObjectLink(f, w, facts));
   const type = baseType(f.type);
   if (type !== undefined && facts.observedV2Classes.includes(type)) return [];
-  return f.writes.filter((w) => w.nestedPath && w.nestedPath !== "[]");
+  return writes.filter((w) => w.nestedPath && w.nestedPath !== "[]");
 }
 
 export function candidates(facts: FileFacts): Candidate[] {
@@ -427,13 +503,13 @@ export function candidates(facts: FileFacts): Candidate[] {
       if (nested.length > 0 && f.readsInBuild.length > 0 && !f.disabledRules.includes("R1")) {
         out.push({
           rule: "R1", kind: "nested-write-unobserved", file: facts.file, component: c, field: f,
-          line: nested[0].line, fingerprint: `${facts.file}#${c.name}.${f.name}#R1-nested`,
+          line: nested[0].line, writes: nested, fingerprint: `${facts.file}#${c.name}.${f.name}#R1-nested`,
         });
       }
     }
     for (const r of c.resources) {
       if (r.released) continue;
-      if (/arkui-sem-disable-next-line[^\n]*\bR3\b/.test(facts.lines[r.acquireLine - 2] ?? "")) continue;
+      if (disabledRulesAt(facts.lines, r.acquireLine - 1).includes("R3")) continue;
       out.push({
         rule: "R3", kind: "unreleased-resource", file: facts.file, component: c, resource: r,
         line: r.acquireLine, fingerprint: `${facts.file}#${c.name}#R3-${r.key}`,

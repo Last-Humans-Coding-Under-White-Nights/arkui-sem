@@ -98,8 +98,8 @@ DevEco differs in two ways that affect the demo:
 3. At idle the gate re-sent the finding (p 0.95) for the original Move button; the agent fixed that one too.
 4. Final code: both buttons build a new `Address` and assign `this.user.address`. This is correct per the OpenHarmony `@State` docs (top-level property assignment is observed; nested writes are not).
 
-Known flaw: the finding cites only line 25 (the first nested write), not the line the agent just wrote.
+Known flaw in that run: the finding cited only line 25 (the first nested write), not the line the agent just wrote. The linter lists every unobserved write of the field.
 
 ## Known risk
 
-If the agent fixes it with a child component that takes the address as `@ObjectLink`, the linter may still flag it: `@ObjectLink` children are not recognised yet. For a clean demo, steer towards replacing the object, or use `Counter.ets`.
+If the agent fixes it with a child component that takes the address as `@ObjectLink`, the linter accepts the fix only when the child and the `@Observed` class are in the same file as the page, and the page no longer renders `this.user.address.city` itself. A child in its own file is still flagged. For a clean demo, steer towards replacing the object or keeping the child in the page file, or use `Counter.ets`.

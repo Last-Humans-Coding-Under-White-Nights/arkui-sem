@@ -110,7 +110,87 @@ ${teardown}
   assert.deepEqual(leaks("    this.bus.off(Events.CHANGE, this.onChange)\n    this.teardown()\n  }\n  teardown() {\n    Mgr.getInstance().unregisterFoo(this.cb)\n    commonEvent.unsubscribe(this.sub)"), []);
 });
 
+// ArkUI docs (@Observed/@ObjectLink): a property change on an @Observed object updates every @ObjectLink bound to it.
+const linked = (classes, child, field, body, write) => `${classes}
+@Component
+struct V {
+  ${child}
+  build() {}
+}
+@Component
+struct P {
+  ${field}
+  build() {
+    Column() {
+      ${body}
+      Button('x').onClick(() => {
+        ${write}
+      })
+    }
+  }
+}`;
+const OTHER = "@Observed\nclass Other {\n  x: number = 0\n}";
+const ITEM = "@Observed\nclass Item {\n  done: boolean = false\n}";
+const TAGS = "@Observed\nclass ObservedArray<T> extends Array<T> {}\n@Observed\nclass User {\n  tags: ObservedArray<string> = new ObservedArray<string>()\n  plain: string[] = []\n}";
+const USER_FIELD = "@State user: User = new User()", TO_ADDRESS = "V({ address: this.user.address })", CITY = "this.user.address.city = 'a'";
+
+test("V1: a deep write is seen by a same-file @ObjectLink child of the owning @Observed class", () => {
+  const cases = [
+    ["linked", [], USER_OBSERVED, "@ObjectLink address: Address", USER_FIELD, TO_ADDRESS, CITY],
+    ["class not @Observed", ["user"], USER, "@ObjectLink address: Address", USER_FIELD, TO_ADDRESS, CITY],
+    ["child links another class", ["user"], `${USER_OBSERVED}\n${OTHER}`, "@ObjectLink other: Other", USER_FIELD, "V({ other: new Other() })\n      Text(this.user.name)", CITY],
+    ["parent renders the path", ["user"], USER_OBSERVED, "@ObjectLink address: Address", USER_FIELD, `${TO_ADDRESS}\n      Text(this.user.address.city)`, CITY],
+    ["undeclared property", ["user"], USER_OBSERVED, "@ObjectLink address: Address", USER_FIELD, TO_ADDRESS, "this.user.constructor.name = 'a'"],
+    ["array item", [], ITEM, "@ObjectLink item: Item", "@State items: Array<Item> = []", "ForEach(this.items, (item: Item) => { V({ item: item }) })", "this.items[0].done = true"],
+    ["@Observed array passed to the child", [], TAGS, "@ObjectLink tags: ObservedArray<string>", USER_FIELD, "V({ tags: this.user.tags })", "this.user.tags.push('a')"],
+    ["plain array in a linked object", ["user"], TAGS, "@ObjectLink user: User", USER_FIELD, "V({ user: this.user })", "this.user.plain.push('a')"],
+  ];
+  for (const [name, hits, ...parts] of cases) assert.deepEqual(nestedHits(linked(...parts)), hits, name);
+});
+
+const DISABLE = "// arkui-sem-disable-next-line R1 -- intended";
+
+test("disable comments: above the decorators, the field name or one write (R1); above the acquire line (R3)", () => {
+  const deep = (field, write = CITY) => v1(USER, field, write, "this.user.address.city");
+  assert.deepEqual(nestedHits(deep(`${DISABLE}\n  @State\n  user: User = new User()`)), []);
+  assert.deepEqual(nestedHits(deep(`${DISABLE}\n  ${USER_FIELD}`)), []);
+  assert.deepEqual(nestedHits(deep(USER_FIELD, `${DISABLE}\n        ${CITY}`)), []);
+  const two = deep(USER_FIELD, `${DISABLE}\n        ${CITY}\n        this.user.address.city = 'b'`);
+  const [c] = candidates(new NaiveExtractor().extract("T.ets", two)).filter((x) => x.kind === "nested-write-unobserved");
+  assert.equal(c.line, two.split("\n").findIndex((l) => l.includes("'b'")) + 1);
+  const r3 = (comment) => candidates(new NaiveExtractor().extract("T.ets", `@Component\nstruct R {\n  aboutToAppear() {\n    ${comment}\n    this.bus.on('refresh', this.h)\n  }\n  build() {}\n}`)).filter((x) => x.rule === "R3").length;
+  assert.deepEqual([r3(""), r3("// arkui-sem-disable-next-line R3 -- app-lifetime bus")], [1, 0]);
+});
+
 console.log(`\n${passed} passed`);
+}
+
+// --- Engine (stub judge) ---
+
+{
+
+const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const { checkFiles, formatForAgent } = await import(pathToFileURL(join(root, "dist", "engine.js")).href);
+const bug = { name: "stub", systemOne: async () => ({ backend: "stub", latencyMs: 0, answers: { verdict: { type: "choice", choice: "desync_bug", confidence: 1, probabilities: { desync_bug: 1 } } } }) };
+const file = join(mkdtempSync(join(tmpdir(), "arkui-sem-engine-")), "P.ets");
+writeFileSync(file, `class Address {\n  city: string = ''\n}\nclass User {\n  address: Address = new Address()\n}
+@Component
+struct P {
+  @State user: User = new User()
+  build() {
+    Column() {
+      Text(this.user.address.city)
+      Button('a').onClick(() => { this.user.address.city = 'a' })
+      Button('b').onClick(() => { this.user.address.city = 'b'; this.user.address.city = 'c' })
+    }
+  }
+}`);
+
+const { findings: [finding] } = await checkFiles([file], { backend: bug });
+assert.match(finding.evidence, /line 13; also written in place at line 14\)/);
+const { findings: questions } = await checkFiles([file], { backend: bug, thresholds: { finding: 2, question: 0 } });
+assert.match(formatForAgent(questions), /above each write it lists, or above the field's decorators/);
+console.log("ok engine: a nested-write finding cites each write line once and says where the disable comment goes");
 }
 
 // --- Config ---
