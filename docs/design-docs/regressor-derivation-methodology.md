@@ -1,7 +1,6 @@
-# Methodology and Derivation of the ArkUI AST Logistic Regressor (v3)
+# Methodology and Architecture of the ArkUI AST Logistic Regressor
 
-**Date:** 2026-10-09  
-**Status:** Approved technical report & design documentation  
+**Status:** Current  
 **Scope:** Static linting of ArkUI declarative state desynchronization (ArkEval Category 1, Rule R1) in `arkui-sem`.
 
 ---
@@ -14,133 +13,120 @@ In the ArkUI declarative framework (OpenHarmony / HarmonyOS), UI reactivity is s
 
 If a component member variable is mutated during user interactions but lacks a state decorator, its underlying value updates in memory while the rendering engine never schedules a re-render for dependent UI components. This silent failure mode is known as **Under-reactive UI state / State Desynchronization**.
 
-### Failure of the Naive Static Rule
-The legacy static heuristic checked only basic syntax conditions:
-$$\text{reads\_in\_build} > 0 \quad \land \quad \text{writes} > 0 \quad \land \quad \text{decorators} = \emptyset \implies \text{Flag Desync Bug}$$
+### The Limits of Naive Static Rules
 
-On a standard balanced benchmark of 300 items (150 true desynchronization bugs and 150 clean helper/bookkeeping fields):
-- **True Bugs Caught:** 148 / 150 (`98.7%` Recall)
-- **False Alarms:** 142 / 150 (`94.7%` False Alarm Rate)
-- **Precision:** `51.0%`
-- **AUC:** `0.52`
+A naive static heuristic flagging all unadorned fields:
 
-This produced a 1:1 noise ratio (coin-flip accuracy), causing developers to disable the linter entirely.
+$$\text{reads\_in\_build} > 0 \land \text{writes} > 0 \land \text{decorators} = \emptyset \implies \text{Flag Desync Bug}$$
+
+exhibits an unacceptably high false alarm rate. In production codebases, many non-reactive fields are legitimately read in `build()` and mutated:
+- One-time initialization in lifecycle hooks (e.g., `aboutToAppear()`).
+- Internal UI controllers (e.g., `Scroller`, `WebviewController`).
+- Temporary computation values and rendering caches.
+
+Flagging all such fields causes developer fatigue and linter abandonment.
 
 ---
 
-## 2. Empirical Investigation of Dense Code Embeddings (Bi-Encoders)
+## 2. Dense Code Embeddings vs. Structural Facts
 
-We explored whether local dense vector embeddings (e.g., `EmbeddingGemma 2` with 768d, `Qwen3-Embedding` with 2560d) combined with k-NN exemplar matching or linear probing could discern reactivity bugs without cloud LLM dependencies.
+Early experiments evaluated whether local dense vector embeddings (e.g., code bi-encoders) combined with k-NN exemplar matching or linear probing could classify reactivity intent without cloud LLM dependencies.
 
-### 2.1. Cosine Similarity Collapse
-We evaluated cosine distances between identical ArkUI components that differed only by the presence or absence of a single state decorator:
+### Cosine Similarity Collapse
 
-```typescript
-// Component A (Clean reactive state):
-@Component struct Card { @State count: number = 0; build() { Text(`${this.count}`) } }
+Dense bi-encoders compute vector representations by pooling token embeddings across entire code blocks. In realistic ArkTS components, a decorator keyword (like `@State`) represents less than 0.5% of the total token count. Layout elements (`Column`, `Row`, `Text`, `Button`) and styling attributes dominate the embedding space.
 
-// Component B (Under-reactive state bug):
-@Component struct Card { count: number = 0; build() { Text(`${this.count}`) } }
-```
-
-- **Cosine similarity $\cos(v_A, v_B)$:**
-  - Raw embedding: `0.9834`
-  - With `task: classification` instruction prefix: `0.9896`
-- **Code-to-Code k-NN (k=3):**
-  - Threshold 0.8: Caught 24 / 150, False alarms 23 / 150 (`AUC = 0.50`)
-  - Threshold 0.5: Caught 104 / 150, False alarms 107 / 150 (`AUC = 0.50`)
-
-### 2.2. Root Cause Analysis
-Dense bi-encoders perform mean pooling over token embeddings. In any realistic ArkTS component, a decorator token represents less than `0.5%` of total token mass. Semantic layout tokens (`Column`, `Row`, `Text`, `Button`, layout attributes) dominate the vector, making the model blind to declarative state semantics.
+Consequently, components differing solely by the presence or absence of a state decorator exhibit near-identical cosine similarities ($\cos(v_A, v_B) \approx 0.98\text{--}0.99$). Token-level dense encoders lack sensitivity to fine-grained declarative state semantics.
 
 ---
 
 ## 3. Mathematical Formulation of the AST Logistic Regressor
 
-Rather than projecting source code into an unstructured embedding space, we extract structured AST facts via `NaiveExtractor` and formulate a continuous logistic classifier.
+Instead of embedding raw tokens, `arkui-sem` extracts structured AST facts via `NaiveExtractor` and applies a continuous logistic scoring model in `HeuristicBackend`.
 
-### 3.1. Formulation
-For each candidate field, an AST feature vector `X = (x_1, x_2, \dots, x_m)` is evaluated. The model computes logit `z`:
-$\z = w_0 + \sum_{i=1}^{m} w_i x_i$$
+### Formulation
 
-The probability of a desynchronization bug is given by the logistic sigmoid:
-$\P(\text{desync\_bug} \mid X) = \sigma(z) = \frac{1}{1 + e^{-z}}$$
+For each candidate field, an AST feature vector $X = (x_1, x_2, \dots, x_m)$ is evaluated. The model computes logit $z$:
 
-### 3.2. Objective Function and Optimization
-Weights were optimized using gradient descent with `L_2` regularization (Ridge penalty) across training splits to prevent overfitting:
-$\mathcal{L}(W) = -\frac{1}{N} \sum_{j=1}^{N} \Big[ y_j \ln(\sigma(z_j)) + (1 - y_j) \ln(1 - \sigma(z_j)) \Big] + \frac{\lambda}{2} \sum_{i=1}^{m} w_i^2$$
-where `\lambda = 0.001` and `\alpha = 0.1` over 500 epochs.
+$$z = w_0 + \sum_{i=1}^{m} w_i x_i$$
 
----
+The probability of a desynchronization bug is given by the standard logistic sigmoid:
 
-## 4. AST Feature Engineering
+$$P(\text{desync\_bug} \mid X) = \sigma(z) = \frac{1}{1 + e^{-z}}$$
 
-Detailed error analysis on residual false alarms revealed distinct structural patterns in production ArkTS applications:
-
-### 1. Architectural Hard Filter (`isControllerOrModel`):
-Certain classes are actively read in `build()` but must never be decorated with `@State`:
-- UI Controllers: `Scroller`, `WebviewController`, `TextAreaController`, `VideoController`, `CanvasRenderingContext2D`.
-- Coordinators and Singletons: `Worker`, `Mutex`, `Client`, `Reporter`, `ViewModel`, `Manager`, `Service`.
-- **Hard Gate:** If the type or name matches, `P = 0.05` unconditionally.
-
-### 2. Lifecycle Initialization (`onlyLifecycle`):
-- `44%` of clean fields without decorators are mutated **only** in `aboutToAppear()` (one-time component initialization).
-- Only `11%` of genuine bugs have writes confined strictly to `aboutToAppear()`.
-- **Condition:** `contexts.length > 0 && contexts.every(c => c === 'lifecycle')`.
-
-### 3. Layout Initialization Helpers (`allInitHelpers`):
-Developers frequently factor out `aboutToAppear()` initialization into private helper methods (`calculateLayout()`, `initBadgeConfigure()`, `setupStyle()`, `processUiExtNode()`). While formally recorded as method mutations, they represent one-time startup computations.
-- **Condition:** All write methods match `^init|^calculate|^compute|^setup|^processUiExtNode|Init$`.
-
-### 4. Interactive Mutations (`hasInteractive`):
-Mutations occurring inside standard business logic methods, asynchronous network callbacks, or event closures defined inside markup (`build-closure`, such as `.onClick(() => { this.count++ })`). This is the primary indicator of reactive state intent.
-
-### 5. Static Name Semantics (`isStaticName`):
-Identifiers indicating internal flags, timers, or formatting constants:
-`/(?:debug|log|trace|cache|tmp|temp|prev|last|timer|handle|controller|listener|config|style)|(?:Id|Ms|Ts|At|Flag|Config|Style)$/i`.
+To prevent extreme overconfidence on noisy edge cases, the probability is clamped within $[0.05, 0.95]$.
 
 ---
 
-## 5. Final Calibrated Model (v3)
+## 4. Name-Free AST Feature Engineering
 
-Calibrated against standard linter threshold bands (`finding >= 0.8`, `question >= 0.5`):
+Rather than relying on brittle naming conventions (such as `on*` or `init*` prefixes that fail to generalize across differing codebases and teams), the feature model relies purely on structural syntax and call-graph reachability:
 
-$\z = -0.30 + \Delta_{\text{context}} + \Delta_{\text{name}} + \Delta_{\text{build}}$$
-$\P(\text{desync\_bug}) = \max\Big(0.05, \min\Big(0.95, \frac{1}{1 + e^{-\max(-20, \min(20, z))}}\Big)\Big)$$
+### 1. Controller / Scroller Architectural Gate
+Certain framework classes are passed to UI components to control scroll positions or views, but do not represent reactive state:
+- Framework controllers: `Scroller`, `Controller` types.
+- Unconditionally gated to a minimal prior ($P = 0.05$).
 
-| Component | AST Condition | Logit Contribution $\Delta$ |
-| :--- | :--- | :---: |
-| **Base Prior (Bias)** | Always | `-0.30$ |
-| **One-time Setup** | `onlyLifecycle || allInitHelpers` | **`-2.00$** |
-| **Interactive Event** | `hasInteractive` (includes `build-closure`) | **`+2.10$** |
-| **Static / Bookkeeping Name** | `isStaticName && !/^items?/` | **`-1.40$** |
-| **Direct Render Assignment** | `hasDirectBuildWrite` | **`-0.60$** |
+### 2. Structural External-Method Reachability
+To identify event handlers, callbacks, and listener targets without matching method names, `NaiveExtractor` builds an intra-component reachability call graph:
+- **Roots:**
+  - `build()` and `@Builder` methods (traversing direct calls and method references such as `.onClick(this.handleClick)`).
+  - Lifecycle hooks (`aboutToAppear`, `aboutToDisappear`, `onPageShow`, `onPageHide`, etc.).
+- **External Methods:** Any component method not reachable from `build()`, `@Builder`, or lifecycle hooks is marked as an external entry point (`external: true`). These are methods called by external listeners, async callbacks, or other classes.
+- Writes occurring inside markup closures (`build-closure`) or in `external` methods indicate interactive mutations that require reactive re-rendering.
+
+### 3. Lifecycle-Only Mutation Penalty
+Mutations confined strictly to lifecycle hooks (`contexts.every(c => c === "lifecycle")`) are typical of one-time setup and reduce the desynchronization logit.
+
+### 4. Deep Nested Mutation Penalty
+ArkUI V1 `@State` only observes first-level property reassignments. In-place mutations two or more levels deep (`this.a.b.c = ...`) do not trigger re-render on the parent component unless using `@Observed` / `@ObjectLink`. Fields with nested writes are penalized to avoid false positives on unobserved nested paths.
+
+### 5. Type Indicators with Word Boundaries
+Primitive types exhibit different likelihoods of being reactive state:
+- `\bboolean\b` and `\bnumber\b`: typically represent toggle flags, counters, or indices (+0.7).
+- `\bstring\b`: often used for static labels or identifiers (-0.6).
+- Arrays (`[]`, `Array<`): (-0.4).
+
+### 6. Declarative UI Modifiers in Build Excerpts
+Excerpts capturing uses in `build()` are inspected for reactive ArkUI UI patterns:
+- Control flow: `ForEach(...)` (+1.8).
+- Visual state attributes: `.visibility()`, `.opacity()` (+1.4).
+- Animations / transformations: `.scale()`, `.rotate()`, `.translate()` (+0.6).
+- Styling / interaction state: `.color()`, `.backgroundColor()`, `.fontColor()`, `.enabled()` (+0.6).
+
+### 7. Time / Performance Bookkeeping Suppression
+Fields associated with `Date.now()`, `performance.now()`, or timer handles (`setTimeout`, `setInterval`) represent internal measurement or scheduling and are penalized (-1.4).
 
 ---
 
-## 6. Cross-Dataset Evaluation Results
+## 5. Calibrated Logit Weights
 
-Validated across three independent benchmark datasets:
+The calibrated feature weights in `HeuristicBackend` operate as follows:
 
-### 1. SystemUI Dataset (300 items: 150 positive, 150 negative)
-- **Legacy Static Heuristic:** Caught 148 / 150, False alarms 142 / 150, Precision `51.0%`, AUC `0.52`.
-- **Embedding k-NN:** Caught 24 / 150, False alarms 23 / 150, Precision `51.1%`, AUC `0.50`.
-- **Cloudflare Clef (Cloud LLM):** Caught 107 / 150, False alarms 40 / 150, Precision `72.8%`, AUC `0.79`.
-- **DeepSeek-flash (API):** Caught 63 / 150, False alarms 15 / 150, Precision `80.8%`, AUC `0.76`.
-- **AST Logistic Regressor v3 (Ours):** Caught 102 / 150, False alarms 23 / 150, **Precision `81.6%`**, **AUC `0.81`**, **Latency `0 ms`**.
-
-*Result: 84% noise reduction (false alarms dropped from 142 to 23), outperforming cloud LLMs in precision and AUC.*
-
-### 2. Application Component Dataset (339 items: V1 @State / @Link)
-- **Recall @ 0.8:** `82.0%` (vs Clef-flash `47%`, DeepSeek `67%`).
-- **Hard Negative Suppression:** Suppressed 5 of 6 complex false alarms without human intervention.
-
-### 3. E-Commerce Dataset (19 items: V2 @ComponentV2 / @Local)
-- **Recall @ 0.8:** `100%` (19/19 true reactivity bugs caught).
-- **False Alarms:** `0`.
+- Base logit: $z_0 = 1.05$
+- Type adjustments:
+  - $\text{type} \sim \text{\textbackslash bboolean\textbackslash b}$: $+0.7$
+  - $\text{type} \sim \text{\textbackslash bnumber\textbackslash b}$: $+0.7$
+  - $\text{type} \sim \text{\textbackslash bstring\textbackslash b}$: $-0.6$
+  - $\text{type} \sim \text{Array}$: $-0.4$
+- Event / Reachability:
+  - `hasEventHandler` (`build-closure` or `external` method): $+1.6$
+  - `onlyLifecycle`: $-1.8$
+  - `hasNestedMutation`: $-0.7$
+  - Multiple writes: $>1$ write ($+0.3$), $>3$ writes ($+0.7$)
+- Markup indicators in excerpts:
+  - `ForEach`: $+1.8$
+  - `visibility` / `opacity`: $+1.4$
+  - `scale` / `rotate` / `translate`: $+0.6$
+  - `color` / `backgroundColor` / `fontColor` / `enabled`: $+0.6$
+  - Timers / timestamps: $-1.4$
 
 ---
 
-## 7. Conclusion
+## 6. Evaluation and Verification
 
-By shifting from token-level dense embeddings to calibrated logistic regression over structural AST facts, `arkui-sem` achieves cloud-level precision (`81.6%`) and high discrimination (`AUC 0.81`) while operating strictly deterministically in `0 ms` with zero external dependencies.
+All quantitative benchmark evaluations, cross-application datasets, run records, and comparative metrics are maintained separately in the private benchmark repository.
+
+For evaluation methodology, metric definitions, and benchmark results, see:
+- `bench/docs/evaluation-method.md`
+- `bench/docs/RESULTS.md`

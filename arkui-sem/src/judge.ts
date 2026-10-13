@@ -350,10 +350,10 @@ export class HeuristicBackend implements SystemOneBackend {
 
         let z = 1.05;
 
-        if (/boolean/i.test(type)) z += 0.7;
-        else if (/number/i.test(type)) z += 0.7;
-        else if (/string/i.test(type)) z -= 0.6;
-        else if (/\[\]|Array</i.test(type)) z -= 0.4;
+        if (/\bboolean\b/.test(type)) z += 0.7;
+        else if (/\bnumber\b/.test(type)) z += 0.7;
+        else if (/\bstring\b/.test(type)) z -= 0.6;
+        else if (/\[\]|Array</.test(type)) z -= 0.4;
 
         if (hasEventHandler) z += 1.6;
         if (onlyLifecycle) z -= 1.8;
