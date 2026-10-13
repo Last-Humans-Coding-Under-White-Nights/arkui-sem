@@ -47,7 +47,7 @@ The localizer (P5) becomes an `arkui_locate(issue_text)` tool.
 
 ## Rule coverage
 
-Status as of 2026-10-08. Scope: ArkEval v1 category 1, "UI state desynchronization" (plus R3 for category 3).
+Status as of 2026-10-13. Scope: ArkEval v1 category 1, "UI state desynchronization" (plus R3 for category 3).
 Background: `docs/design-docs/core-beliefs.md` §3–§4 (rungs, rule families, architecture), `docs/design-docs/agentic-plugin.md`.
 
 ### Rules (RN)
@@ -83,7 +83,7 @@ The compiler already rejects writes to a V2 `@Param` and `@Link` without `$` (ca
 | R1 nested write, V1 (depth ≥ 2) | ✅ Same file | Field's class resolved across files | Aliasing (`const it = this.list[i]; it.x = …`): ArkAnalyzer |
 | R1 nested write, V2 (class not `@ObservedV2`) | ⚠️ Same-file classes only | ✅ Cross-file class lookup | – |
 | `@Trace` per property | ❌ Only the class is checked | ✅ Class (LSP) + property decorator (our parse) | Rule + eval |
-| `@Observed` / `@ObjectLink` children | ❌ (correct fixes still flagged) | ✅ Cross-file `@Observed` class + child `@ObjectLink` | – |
+| `@Observed` / `@ObjectLink` children | ⚠️ Same file only (class, child and parent) | ✅ Cross-file `@Observed` class + child `@ObjectLink` | – |
 | `@Track` | ❌ | Class lookup only | Rule design |
 | R2 facts: call-site edges | ❌ | ✅ `references` on struct → call sites; our parse of the object literal | Bench scale needs a one-pass index |
 | R2-a | ❌ | ✅ Detected (`references` + `documentHighlight` write kinds) | Judge: snapshot intended? |
@@ -130,7 +130,7 @@ Each phase starts only after an explicit go.
 #### Phase 3: rules from facts alone
 - [ ] V2 nested write with cross-file `@ObservedV2` classes
 - [ ] `@Trace` per property (mutated + rendered property without `@Trace`); evaluate on the bench's trace items
-- [ ] `@Observed` / `@ObjectLink` recognition (closes the open false positive)
+- [ ] `@Observed` / `@ObjectLink` recognition across files (the same-file case is done)
 - [ ] R2-d event unwired
 - [ ] R2-f multiple parents
 

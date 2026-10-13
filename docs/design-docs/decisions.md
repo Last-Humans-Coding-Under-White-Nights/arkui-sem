@@ -7,6 +7,11 @@
   - The chain is not implemented yet (planned in `src/judge.ts`, with `backend` allowed to be a list).
 - **Evaluation scope:** masked-decorator-prediction (MDP) datasets. Each component field's real decorator is the label, and the model sees the component with that decorator and its clues masked. The datasets, their numbers and the runs are in the private bench (`bench/docs/decisions.md`).
 - **Decorator prediction dropped** (2026-10-08): no decorator-choice model runs, no large-LLM comparison on that task; the MDP datasets now supply items for the judge questions R1–R3.
+- **R1 nested write with `@ObjectLink`** (2026-10-13): a V1 write two or more levels deep is silent, not downgraded, when the
+  class owning the written property is `@Observed`, a child takes that class as `@ObjectLink`, and the parent doesn't render
+  the path itself. Same file first; cross-file children come with the cross-file facts.
+- **Disable comments** (2026-10-13): `// arkui-sem-disable-next-line <rules>` works above the field name, above its decorator
+  lines, and above a single write (that write only, for nested-write findings); R1 and R3 share one parser.
 - **Later:** an ArkAnalyzer extractor behind the `FactExtractor` interface; then re-run on the union of candidates.
 - **Repos: this repo is public, the bench is a private submodule** (2026-10-08).
   - GitHub's free organization plan gives branch protection (required reviews, rulesets) only to public repos, so the code lives in the public repo, where those gates work.

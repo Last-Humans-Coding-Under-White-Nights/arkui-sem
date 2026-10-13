@@ -25,7 +25,8 @@ export function formatForAgent(findings: Finding[], cwd = process.cwd()): string
   for (const f of questions) {
     out.push(`- [${f.rule}?] ${relative(cwd, f.file)}:${f.line} ${f.subject} (${pct(f.p)}, ${f.backend})`);
     out.push(`  ${f.evidence}. Is this intended? If it should behave reactively/be released: ${f.fix}`);
-    out.push(`  If it is intentional, leave it and add \`// arkui-sem-disable-next-line ${f.rule} -- <reason>\` above line ${f.line}.`);
+    const where = f.kind === "nested-write-unobserved" ? "above each write it lists, or above the field's decorators for all of them" : `above line ${f.line}`;
+    out.push(`  If it is intentional, leave it and add \`// arkui-sem-disable-next-line ${f.rule} -- <reason>\` ${where}.`);
   }
   return out.join("\n");
 }
@@ -83,6 +84,12 @@ function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
   return Promise.race([p, new Promise<T>((_, reject) => setTimeout(() => reject(new Error(`judge timed out after ${ms} ms`)), ms))]);
 }
 
+/** "line 4", "lines 4 and 9", "lines 4, 7 and 9". */
+function lineList(lines: number[]): string {
+  if (lines.length === 1) return `line ${lines[0]}`;
+  return `lines ${lines.slice(0, -1).join(", ")} and ${lines[lines.length - 1]}`;
+}
+
 function describe(facts: FileFacts, c: Candidate): { subject: string; evidence: string; fix: string } {
   const v2 = c.component.version === "V2";
   if (c.resource) {
@@ -97,11 +104,13 @@ function describe(facts: FileFacts, c: Candidate): { subject: string; evidence: 
   const f = c.field!;
   const writes = f.writes.slice(0, 2).map((w) => `${w.context} in ${w.method}() line ${w.line}`).join("; ");
   if (c.kind === "nested-write-unobserved") {
-    const w = f.writes.find((x) => x.line === c.line) ?? f.writes[0];
+    const [w, ...rest] = c.writes?.length ? c.writes : f.writes;
     const path = w?.nestedPath ?? "";
     const type = f.type?.replace(/\[\]$/, "") ?? "<its class>";
     const first = path.match(/^\??\.(\w+)/)?.[1];
-    const at = `${w?.context} in ${w?.method}() line ${w?.line}`;
+    const otherLines = [...new Set(rest.map((x) => x.line))].filter((l) => l !== w.line);
+    const also = otherLines.length ? `; also written in place at ${lineList(otherLines)}` : "";
+    const at = `${w?.context} in ${w?.method}() line ${w?.line}${also}`;
     if (v2) {
       return {
         subject: `${c.component.name}.${f.name}${path}`,
