@@ -1,0 +1,8 @@
+#!/bin/sh
+# Lints and format-checks staged arkui-sem files with Biome, and typechecks when TypeScript is staged.
+# Activated by scripts/setup.mjs (git config core.hooksPath .githooks). Skip once with git commit --no-verify.
+staged=$(git diff --cached --name-only --diff-filter=ACMR -- arkui-sem)
+[ -z "$staged" ] && exit 0
+cd arkui-sem || exit 1
+npx --no-install biome check --staged --no-errors-on-unmatched || exit 1
+if echo "$staged" | grep -q '\.ts$'; then npx --no-install tsc -p . --noEmit || exit 1; fi

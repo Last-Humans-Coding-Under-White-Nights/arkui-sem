@@ -20,6 +20,7 @@ You need git, a recent Node.js, and [opencode](https://opencode.ai) if you want 
 node scripts/setup.mjs            # build the linter, install the plugin into sandbox/demo
 node scripts/setup.mjs --doctor   # show what is missing, change nothing
 cd arkui-sem && npm test          # offline tests
+cd arkui-sem && npm run lint      # Biome lint + format check (also the pre-commit hook)
 ```
 
 Model calls need your own API keys. Run `node arkui-sem/dist/cli.js config --init` and fill in the file it creates
@@ -47,7 +48,7 @@ repo. Update the `bench` pointer in this repo only when the public side needs a 
 ## Making a change
 
 1. Branch from `main` and commit the way you normally do.
-2. Run the offline tests (`cd arkui-sem && npm test`) and open a pull request. GitHub pre-fills the description with
+2. Run the offline tests and the lint (`cd arkui-sem && npm test && npm run lint`) and open a pull request. GitHub pre-fills the description with
    three short sections (what and why, how it was checked, notes); a few plain lines each is enough.
 3. CI runs the same tests on the PR (the `test` check). Push more commits during review. Merge when a reviewer
    approved and the check is green.

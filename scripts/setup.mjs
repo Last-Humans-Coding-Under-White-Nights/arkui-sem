@@ -39,6 +39,7 @@ function report() {
     ["opencode on PATH (agent sessions, verify-backend)", out("opencode", ["--version"]) !== null, ""],
     ["arkui-sem/node_modules", existsSync(join(LINTER, "node_modules")), "npm install in arkui-sem/"],
     ["arkui-sem/dist up to date", existsSync(join(LINTER, "dist/cli.js")) && newest(join(LINTER, "dist")) >= newest(join(LINTER, "src")), "npm run build in arkui-sem/"],
+    ["pre-commit hook (lint arkui-sem)", out("git", ["config", "core.hooksPath"]) === ".githooks", "git config core.hooksPath .githooks"],
     ["plugin in sandbox/demo", existsSync(join(PROJECT, ".opencode/plugins/arkui-sem.ts")), "node arkui-sem/scripts/install.mjs sandbox/demo"],
     ["API key file exists (live runs only; not read)", existsSync(keyFile), "node arkui-sem/dist/cli.js config --init, then fill it in yourself"],
   ];
@@ -57,6 +58,7 @@ function report() {
 if (doctor) process.exit(report() ? 1 : 0);
 
 if (!existsSync(join(LINTER, "node_modules"))) step("npm ci (arkui-sem)", "npm", ["ci"], LINTER);
+step("enable pre-commit hook", "git", ["config", "core.hooksPath", ".githooks"]);
 step("build arkui-sem", "npm", ["run", "build"], LINTER);
 step("install plugin + skill into sandbox/demo", process.execPath, [join(LINTER, "scripts/install.mjs"), PROJECT]);
 if (existsSync(BENCH_SETUP)) step("bench datasets", process.execPath, [BENCH_SETUP, ...benchArgs]);

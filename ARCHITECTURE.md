@@ -22,8 +22,9 @@ gives the agent `arkui_check` and `arkui_facts`. The skill `arkui-state-manageme
 README.md, AGENTS.md, CLAUDE.md (@AGENTS.md), CONTRIBUTING.md, ARCHITECTURE.md
 .gitignore, .gitattributes                LF line endings everywhere; ignores refs/, sandbox scratch, the local setup notes
 docs/                                    see AGENTS.md for the map
-scripts/setup.mjs [--doctor]             build the linter, install the plugin into sandbox/demo; runs bench/setup.mjs when present
-.github/workflows/test.yml               CI: npm ci + npm test in arkui-sem/ on Linux, every PR and push to main
+scripts/setup.mjs [--doctor]             build the linter, install the plugin into sandbox/demo, enable .githooks; runs bench/setup.mjs when present
+.githooks/pre-commit                     Biome check of staged arkui-sem/ files, typecheck when TypeScript is staged
+.github/workflows/test.yml               CI: npm ci + npm run lint + npm test in arkui-sem/ on Linux, every PR and push to main
 .github/pull_request_template.md         PR description: what and why, how it was checked, notes
 .claude/settings.json, opencode.json,    deny rules for the key file and `arkui-sem config`
 .codex/rules/arkui-sem.rules               (Codex: exact command prefixes; test with `codex execpolicy check`)
