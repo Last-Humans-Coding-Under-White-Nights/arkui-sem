@@ -21,6 +21,8 @@ jobs:
           cache-dependency-path: arkui-sem/package-lock.json
       - run: npm ci
         working-directory: arkui-sem
+      - run: npm run lint
+        working-directory: arkui-sem
       - run: npm test
         working-directory: arkui-sem
         env:
