@@ -32,7 +32,13 @@ edits after each tool call, gates the session once on idle while findings remain
 ```sh
 node dist/cli.js check <file.ets|dir>... [--format agent|json] [--backend <name>]
 node dist/cli.js config [--init]           # prints masked key fragments
+node dist/cli.js lsp <definition|references|callers|callees> <file.ets> <line:col> [--project <dir>] [--ace-server <dir>] [--sdk <dir>] [--node <path>] [--verbose]
 ```
+
+`lsp` queries Huawei's ArkTS language server (ace-server, not bundled): DevEco Studio's own (default install on Windows
+and macOS), or the build `ARKUI_SEM_ACE_SERVER` / `--ace-server` points to; a build with `out/standardIndex/index.js`
+(DevEco 26+) is driven over standard LSP. The SDK comes from DevEco Studio or `ARKUI_SEM_SDK`; `ARKUI_SEM_LSP_NODE`
+picks the node that runs the server.
 
 ## Backends and configuration
 

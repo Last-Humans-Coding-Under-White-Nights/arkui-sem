@@ -826,3 +826,175 @@ struct P {
   srv.close();
   console.log('ok openrouter clef backend');
 }
+
+// --- ArkTS LSP client (fake ace-server) ---
+
+{
+  const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+  const load = (p) => import(pathToFileURL(join(root, 'dist', 'lsp', p)).href);
+  const { locations, startArktsLsp } = await load('client.js');
+  const { JsonRpc } = await load('jsonrpc.js');
+  const { findModuleDirs, projectRootFor, toFileUri } = await load('project.js');
+  const { defaultNode, locateServer, resolvePaths } = await load('server.js');
+  const { copyFileSync, rmSync } = await import('node:fs');
+  const { spawn } = await import('node:child_process');
+
+  const tmp = mkdtempSync(join(tmpdir(), 'arkui-sem-lsp-test-'));
+  const put = (rel, text) => {
+    const p = join(tmp, rel);
+    mkdirSync(dirname(p), { recursive: true });
+    writeFileSync(p, text);
+    return p;
+  };
+  const fake = join(root, 'test', 'fixtures', 'fake-ace-server.mjs');
+  for (const entry of ['clt/out/standardIndex/index.js', 'studio/plugins/openharmony/ace-server/out/index.js']) {
+    mkdirSync(dirname(join(tmp, entry)), { recursive: true });
+    copyFileSync(fake, join(tmp, entry));
+  }
+  put('sdk/default/openharmony/ets/api/.keep', '');
+  put('sdk/default/sdk-pkg.json', JSON.stringify({ data: { apiVersion: '24', version: '6.1.1.125' } }));
+  const page = put('proj/entry/src/main/ets/pages/P.ets', '@Component\nstruct P {\n  build() {}\n}\n');
+  // Explicit paths everywhere, so ARKUI_SEM_* variables on the machine can't change the outcome.
+  // maxOldSpaceMb: undefined must keep the default, as optional settings are passed through that way.
+  const base = {
+    sdk: join(tmp, 'sdk'),
+    node: process.execPath,
+    initTimeoutMs: 10_000,
+    requestTimeoutMs: 10_000,
+    maxOldSpaceMb: undefined,
+  };
+
+  let passed = 0;
+  const test = async (name, fn) => {
+    await fn();
+    passed++;
+    console.log(`ok - ${name}`);
+  };
+
+  await test('modules are the */src/main/ets dirs; the project root is above them', async () => {
+    put('proj/features/lib/src/main/ets/A.ets', 'P()');
+    assert.deepEqual(findModuleDirs(join(tmp, 'proj')).sort(), [
+      join(tmp, 'proj', 'entry'),
+      join(tmp, 'proj', 'features', 'lib'),
+    ]);
+    assert.equal(projectRootFor(page), join(tmp, 'proj'));
+    put('proj2/build-profile.json5', '{}');
+    assert.equal(projectRootFor(put('proj2/entry/src/main/ets/B.ets', '')), join(tmp, 'proj2'));
+  });
+
+  await test('file URIs use the upper-case drive form and round-trip through locations', async () => {
+    const uri = toFileUri(page);
+    if (process.platform === 'win32') {
+      assert.match(uri, /^file:\/\/\/[A-Z]%3A\//);
+    }
+    const range = { start: { line: 1, character: 0 }, end: { line: 1, character: 3 } };
+    assert.deepEqual(locations(null), []);
+    assert.equal(locations({ uri, range })[0].file, page);
+    assert.equal(locations([{ targetUri: uri, targetSelectionRange: range }])[0].range, range);
+  });
+
+  await test('locateServer finds Studio and CLT layouts and prefers the standard entry', async () => {
+    assert.equal(locateServer(join(tmp, 'clt')).protocol, 'standard');
+    assert.equal(locateServer(join(tmp, 'studio')).protocol, 'legacy');
+    assert.throws(() => resolvePaths({ aceServer: join(tmp, 'clt'), sdk: join(tmp, 'no-sdk') }, {}), /SDK not found/);
+    assert.throws(
+      () => resolvePaths({ aceServer: join(tmp, 'nothing'), sdk: join(tmp, 'sdk') }, {}),
+      /no ace-server entry/,
+    );
+  });
+
+  await test('the server comes from the option, else ARKUI_SEM_ACE_SERVER', async () => {
+    const options = { sdk: join(tmp, 'sdk'), node: process.execPath };
+    const env = { ARKUI_SEM_ACE_SERVER: join(tmp, 'studio') };
+    assert.equal(resolvePaths(options, env).server.protocol, 'legacy');
+    assert.equal(resolvePaths({ ...options, aceServer: join(tmp, 'clt') }, env).server.protocol, 'standard');
+  });
+
+  await test('under Bun (opencode) the server runs on node, not on process.execPath', async () => {
+    assert.equal(defaultNode(undefined, false), process.execPath);
+    assert.equal(defaultNode(undefined, true), 'node');
+    const bundled = put(process.platform === 'win32' ? 'studio/tools/node/node.exe' : 'studio/tools/node/bin/node', '');
+    assert.equal(defaultNode(join(tmp, 'studio'), true), bundled);
+  });
+
+  await test('a server that cannot start rejects instead of hanging', async () => {
+    await assert.rejects(
+      () => startArktsLsp(join(tmp, 'proj'), { ...base, aceServer: join(tmp, 'clt'), node: join(tmp, 'no-node') }),
+      /failed to start|exited/,
+    );
+    await assert.rejects(
+      () => startArktsLsp(join(tmp, 'sdk'), { ...base, aceServer: join(tmp, 'clt') }),
+      /no ArkTS module/,
+    );
+  });
+
+  await test('writing to a server that just exited does not crash the client', async () => {
+    const child = spawn(process.execPath, ['-e', 'setTimeout(() => process.exit(0), 50)'], {
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    const rpc = new JsonRpc(child);
+    const exited = new Promise((r) => rpc.once('exit', r));
+    const timer = setInterval(() => child.stdin.writable && child.stdin.write('x'.repeat(65536)), 5);
+    await exited;
+    clearInterval(timer);
+    assert.equal(rpc.alive, false);
+    await assert.rejects(() => rpc.request('shutdown', null, 1000), /not running/);
+  });
+
+  for (const [protocol, server] of [
+    ['standard', 'clt'],
+    ['legacy', 'studio'],
+  ]) {
+    await test(`${protocol} protocol: initialize, open, change, definition, references, callers, callees, stop`, async () => {
+      const lsp = await startArktsLsp(join(tmp, 'proj'), { ...base, aceServer: join(tmp, server) });
+      try {
+        assert.equal(lsp.protocol, protocol);
+        lsp.open(page);
+        lsp.open(page, '@Component\nstruct P {}\n');
+        const at = { line: 1, character: 8 };
+        // The fake answers on the line of the document's last version: 2 means the change arrived.
+        assert.deepEqual(
+          (await lsp.definition(page, at)).map((l) => [l.file, l.range.start.line]),
+          [[page, 2]],
+        );
+        const refs = await lsp.references(page, at);
+        if (protocol === 'standard') {
+          assert.deepEqual(
+            refs.map((l) => l.range.start.line),
+            [1, 7],
+          );
+        }
+        // Legacy find-usages sees open documents only, and only the queried file is opened: A.ets stays closed.
+        else {
+          assert.deepEqual(
+            refs.map((l) => l.file),
+            [page],
+          );
+        }
+        const callers = await lsp.callers(page, { line: 3, character: 3 });
+        assert.deepEqual(
+          callers.map((c) => [c.item.name, c.item.container, c.item.file, c.calls.map((r) => r.start.line)]),
+          [['build', 'P', page, [9]]],
+        );
+        assert.deepEqual(
+          (await lsp.callees(page, { line: 3, character: 3 })).map((c) => [c.name, c.selection.start.line]),
+          [['save', 12]],
+        );
+        assert.throws(() => lsp.open(join(tmp, 'missing.ets')), /ENOENT/);
+        lsp.close(page);
+        if (protocol === 'legacy') {
+          // A queried file that was closed is opened again.
+          assert.ok((await lsp.references(page, at)).some((l) => l.file === page));
+        }
+      } finally {
+        await lsp.stop();
+      }
+      const started = Date.now();
+      await assert.rejects(() => lsp.definition(page, { line: 0, character: 0 }), /not running/);
+      assert.ok(Date.now() - started < 1000, 'a query after stop fails at once');
+    });
+  }
+
+  rmSync(tmp, { recursive: true, force: true });
+  console.log(`\n${passed} passed`);
+}

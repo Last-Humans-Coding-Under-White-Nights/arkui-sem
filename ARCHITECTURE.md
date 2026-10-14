@@ -43,8 +43,10 @@ arkui-sem/                               the linter (opencode plugin, package ar
                        heuristic, DeepSeek (flash, structured output), backend registry
   src/engine.ts        candidates → slices → judge → finding/question bands (thresholds 0.8 / 0.5); agent formatting
   src/config.ts        defaults < ~/.config/arkui-sem/config.json < .opencode/arkui-sem.json < env < plugin options
-  src/cli.ts           arkui-sem check | config  (default backend: clef)
-  test/arkui-sem.test.mjs  all tests (npm test, offline); test/fixtures/: Counter, Feed, Profile (R1), Ticker (R3)
+  src/cli.ts           arkui-sem check | config | lsp  (default backend: clef)
+  src/lsp/             utility client for ace-server (ArkTS language server): definition, references, call hierarchy
+  test/arkui-sem.test.mjs  all tests (npm test, offline); test/fixtures/: Counter, Feed, Profile (R1), Ticker (R3),
+                       fake-ace-server.mjs (both LSP protocols)
   skills/arkui-state-management/SKILL.md, scripts/install.mjs
   backends `or-clef` / `or-clef-flash`: Clef via OpenRouter Decisions API (POST https://openrouter.ai/api/alpha/decisions; OPENROUTER_API_KEY or openrouter.apiKey; openrouter.baseUrl)
   backend `laya`: local TypeSafe-compatible server (default http://127.0.0.1:8080; laya.baseUrl / LAYA_BASE_URL);
