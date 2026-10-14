@@ -1,9 +1,11 @@
 #!/bin/sh
 # Lints staged arkui-sem files; typechecks when TypeScript is staged. Enabled by scripts/setup.mjs; skip with --no-verify.
+# The file list is read before cd: in a worktree git sets GIT_DIR, and git then takes the cwd as the repo root.
 set -e
-git diff --cached --quiet -- arkui-sem && exit 0
+files=$(git diff --cached --name-only --diff-filter=ACMR -- arkui-sem | sed 's|^arkui-sem/||')
+[ -z "$files" ] && exit 0
 cd arkui-sem
-npx --no-install biome check --staged --no-errors-on-unmatched
-if git diff --cached --name-only -- '*.ts' | grep -q .; then
+npx --no-install biome check --no-errors-on-unmatched --files-ignore-unknown=true $files
+if echo "$files" | grep -q '\.ts$'; then
   npx --no-install tsc --noEmit
 fi
