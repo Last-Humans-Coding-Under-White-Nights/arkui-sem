@@ -31,7 +31,10 @@
     "rules": {
       "preset": "recommended",
       "style": {
-        "useConst": "error"
+        "useConst": "error",
+        "useBlockStatements": "error",
+        "useSingleVarDeclarator": "error",
+        "useConsistentTypeDefinitions": "error"
       },
       "correctness": {
         "noUnusedVariables": "error",

@@ -185,9 +185,9 @@ struct P {
   const ITEM = '@Observed\nclass Item {\n  done: boolean = false\n}';
   const TAGS =
     '@Observed\nclass ObservedArray<T> extends Array<T> {}\n@Observed\nclass User {\n  tags: ObservedArray<string> = new ObservedArray<string>()\n  plain: string[] = []\n}';
-  const USER_FIELD = '@State user: User = new User()',
-    TO_ADDRESS = 'V({ address: this.user.address })',
-    CITY = "this.user.address.city = 'a'";
+  const USER_FIELD = '@State user: User = new User()';
+  const TO_ADDRESS = 'V({ address: this.user.address })';
+  const CITY = "this.user.address.city = 'a'";
 
   test('V1: a deep write is seen by a same-file @ObjectLink child of the owning @Observed class', () => {
     const cases = [
@@ -284,7 +284,9 @@ struct P {
         "this.user.plain.push('a')",
       ],
     ];
-    for (const [name, hits, ...parts] of cases) assert.deepEqual(nestedHits(linked(...parts)), hits, name);
+    for (const [name, hits, ...parts] of cases) {
+      assert.deepEqual(nestedHits(linked(...parts)), hits, name);
+    }
   });
 
   const DISABLE = '// arkui-sem-disable-next-line R1 -- intended';
@@ -383,7 +385,9 @@ struct P {
 
   let passed = 0;
   const test = (name, fn) => {
-    for (const v of VARS) delete process.env[v];
+    for (const v of VARS) {
+      delete process.env[v];
+    }
     process.env.ARKUI_SEM_CONFIG = userFile;
     write(userFile, '{}');
     write(projectFile, '{}');
@@ -504,7 +508,9 @@ struct P {
 
   const server = createServer(async (req, res) => {
     let raw = '';
-    for await (const chunk of req) raw += chunk;
+    for await (const chunk of req) {
+      raw += chunk;
+    }
     const body = JSON.parse(raw);
     requests.push({ url: req.url, body });
     const reply = (code, json) => {
@@ -771,13 +777,17 @@ struct P {
   let mode = 'ok';
   const srv = createServer(async (req, res) => {
     let raw = '';
-    for await (const chunk of req) raw += chunk;
+    for await (const chunk of req) {
+      raw += chunk;
+    }
     seen.push({ url: req.url, auth: req.headers.authorization, body: JSON.parse(raw) });
     const send = (code, json) => {
       res.writeHead(code, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify(json));
     };
-    if (mode === 'error') return send(401, { error: { message: 'bad key sk-or-secret' } });
+    if (mode === 'error') {
+      return send(401, { error: { message: 'bad key sk-or-secret' } });
+    }
     send(200, { answers: { q: { type: 'noul', noul: 0.9 } } });
   });
   await new Promise((r) => srv.listen(0, '127.0.0.1', r));

@@ -15,10 +15,14 @@ import { buildSlice, Q_R1, Q_R2, Q_R3, type SystemOneBackend } from './judge.js'
 
 // --- Formatting ---
 
-const pct = (p: number | null) => (p === null ? 'judge unavailable' : `p=${p.toFixed(2)}`);
+function pct(p: number | null) {
+  return p === null ? 'judge unavailable' : `p=${p.toFixed(2)}`;
+}
 
 export function formatForAgent(findings: Finding[], cwd = process.cwd()): string {
-  if (findings.length === 0) return '';
+  if (findings.length === 0) {
+    return '';
+  }
   const out: string[] = [];
   const confident = findings.filter((f) => f.band === 'finding');
   const questions = findings.filter((f) => f.band === 'question');
@@ -84,7 +88,9 @@ const VIOLATION_LABEL: Record<Candidate['rule'], string> = {
 class JudgmentCache {
   private entries: Record<string, number> = {};
   constructor(private readonly path?: string) {
-    if (!path) return;
+    if (!path) {
+      return;
+    }
     try {
       this.entries = JSON.parse(readFileSync(path, 'utf8'));
     } catch {
@@ -98,7 +104,9 @@ class JudgmentCache {
     this.entries[key] = p;
   }
   save() {
-    if (!this.path) return;
+    if (!this.path) {
+      return;
+    }
     mkdirSync(dirname(this.path), { recursive: true });
     writeFileSync(this.path, JSON.stringify(this.entries));
   }
@@ -113,7 +121,9 @@ function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
 
 /** "line 4", "lines 4 and 9", "lines 4, 7 and 9". */
 function lineList(lines: number[]): string {
-  if (lines.length === 1) return `line ${lines[0]}`;
+  if (lines.length === 1) {
+    return `line ${lines[0]}`;
+  }
   return `lines ${lines.slice(0, -1).join(', ')} and ${lines[lines.length - 1]}`;
 }
 
@@ -197,7 +207,9 @@ export async function checkFiles(
           const verdict = answers.verdict;
           if (verdict?.type === 'choice') {
             p = verdict.probabilities[VIOLATION_LABEL[c.rule]] ?? null;
-            if (p !== null) cache.set(key, p);
+            if (p !== null) {
+              cache.set(key, p);
+            }
           }
         } catch (e) {
           errors.push(`${opts.backend.name}: ${(e as Error).message}`);
@@ -207,7 +219,9 @@ export async function checkFiles(
       // Judge unavailable → degrade to deterministic-only and ask rather than assert.
       const band: Band | null =
         p === null ? 'question' : p >= thresholds.finding ? 'finding' : p >= thresholds.question ? 'question' : null;
-      if (band === null) continue;
+      if (band === null) {
+        continue;
+      }
       findings.push({
         fingerprint: c.fingerprint,
         rule: c.rule,

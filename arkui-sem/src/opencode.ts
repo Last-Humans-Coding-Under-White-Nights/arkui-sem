@@ -24,19 +24,20 @@ export const ArkuiSemPlugin: Plugin = async ({ client, directory }, options) => 
   const sessions = new Map<string, SessionState>();
   let backend: SystemOneBackend | undefined;
 
-  const log = (level: 'debug' | 'info' | 'warn' | 'error', message: string) =>
-    client.app.log({ body: { service: 'arkui-sem', level, message } }).catch(() => undefined);
+  function log(level: 'debug' | 'info' | 'warn' | 'error', message: string) {
+    return client.app.log({ body: { service: 'arkui-sem', level, message } }).catch(() => undefined);
+  }
 
-  const session = (id: string): SessionState => {
+  function session(id: string): SessionState {
     let s = sessions.get(id);
     if (!s) {
       s = { touched: new Set(), reported: new Set(), lastGateKey: '', followups: 0 };
       sessions.set(id, s);
     }
     return s;
-  };
+  }
 
-  const run = async (files: string[]): Promise<Finding[]> => {
+  async function run(files: string[]): Promise<Finding[]> {
     backend ??= await createBackend(settings.backend, settings.credentials);
     const { findings, errors } = await checkFiles(files, {
       backend,
@@ -44,27 +45,41 @@ export const ArkuiSemPlugin: Plugin = async ({ client, directory }, options) => 
       cachePath: cachePath(settings),
       judgeTimeoutMs: settings.judgeTimeoutMs,
     });
-    if (errors.length) await log('warn', errors.join('; '));
+    if (errors.length) {
+      await log('warn', errors.join('; '));
+    }
     return findings;
-  };
+  }
 
   await log(
     'info',
     `loaded (backend=${settings.backend}, gate=${settings.gate}, config=${settings.sources.join(', ') || 'none'})`,
   );
-  for (const w of settings.warnings) await log('warn', w);
+  for (const w of settings.warnings) {
+    await log('warn', w);
+  }
 
   return {
     'tool.execute.after': async (input, output) => {
-      if (!EDIT_TOOLS.has(input.tool)) return;
+      if (!EDIT_TOOLS.has(input.tool)) {
+        return;
+      }
       const files = editedFiles(input.args, directory).filter((f) => f.endsWith('.ets'));
-      if (files.length === 0) return;
+      if (files.length === 0) {
+        return;
+      }
       try {
         const s = session(input.sessionID);
-        for (const f of files) s.touched.add(f);
+        for (const f of files) {
+          s.touched.add(f);
+        }
         const fresh = (await run(files)).filter((f) => !s.reported.has(f.fingerprint));
-        for (const f of fresh) s.reported.add(f.fingerprint);
-        if (fresh.length > 0) output.output = `${output.output}\n\n${formatForAgent(fresh, directory)}`;
+        for (const f of fresh) {
+          s.reported.add(f.fingerprint);
+        }
+        if (fresh.length > 0) {
+          output.output = `${output.output}\n\n${formatForAgent(fresh, directory)}`;
+        }
       } catch (e) {
         // Never break the agent loop because the linter failed.
         await log('error', `post-edit check failed: ${(e as Error).message}`);
@@ -72,10 +87,14 @@ export const ArkuiSemPlugin: Plugin = async ({ client, directory }, options) => 
     },
 
     event: async ({ event }) => {
-      if (event.type !== 'session.idle' || !settings.gate) return;
+      if (event.type !== 'session.idle' || !settings.gate) {
+        return;
+      }
       const id = event.properties.sessionID;
       const s = sessions.get(id);
-      if (!s || s.touched.size === 0) return;
+      if (!s || s.touched.size === 0) {
+        return;
+      }
       try {
         const confident = (await run([...s.touched])).filter((f) => f.band === 'finding');
         const key = confident

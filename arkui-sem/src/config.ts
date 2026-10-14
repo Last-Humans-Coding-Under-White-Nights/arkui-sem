@@ -59,13 +59,18 @@ const SCHEMA: Record<string, 'string' | 'boolean' | 'number' | Record<string, 's
 };
 const SECRET_KEYS = new Set(['deepseek.apiKey', 'typesafe.apiKey', 'cloudflare.apiToken', 'openrouter.apiKey']);
 
-export const userConfigPath = () =>
-  process.env.ARKUI_SEM_CONFIG ?? join(homedir(), '.config', 'arkui-sem', 'config.json');
-export const projectConfigPath = (projectDir: string) => join(projectDir, '.opencode', 'arkui-sem.json');
+export function userConfigPath() {
+  return process.env.ARKUI_SEM_CONFIG ?? join(homedir(), '.config', 'arkui-sem', 'config.json');
+}
+export function projectConfigPath(projectDir: string) {
+  return join(projectDir, '.opencode', 'arkui-sem.json');
+}
 
 /** Invalid entries are dropped with a warning, never thrown. */
 function readConfig(path: string, scope: 'user' | 'project', warnings: string[]): ConfigFile | undefined {
-  if (!existsSync(path)) return undefined;
+  if (!existsSync(path)) {
+    return undefined;
+  }
   let raw: unknown;
   try {
     raw = JSON.parse(readFileSync(path, 'utf8'));
@@ -85,8 +90,11 @@ function readConfig(path: string, scope: 'user' | 'project', warnings: string[])
       continue;
     }
     if (typeof expected === 'string') {
-      if (typeof value === expected) out[key] = value;
-      else warnings.push(`${path}: "${key}" should be a ${expected}`);
+      if (typeof value === expected) {
+        out[key] = value;
+      } else {
+        warnings.push(`${path}: "${key}" should be a ${expected}`);
+      }
       continue;
     }
     if (typeof value !== 'object' || value === null || Array.isArray(value)) {
@@ -115,22 +123,30 @@ function readConfig(path: string, scope: 'user' | 'project', warnings: string[])
   return out as ConfigFile;
 }
 
-const env = (key: string) => {
+function env(key: string) {
   const v = process.env[key];
   return v === undefined || v === '' ? undefined : v;
-};
-const num = (v: unknown) => (v === undefined || v === '' || Number.isNaN(Number(v)) ? undefined : Number(v));
-const bool = (v: unknown) => (v === undefined || v === '' ? undefined : v !== false && v !== 'false' && v !== '0');
-const first = <T>(...values: (T | undefined)[]) => values.find((v) => v !== undefined);
+}
+function num(v: unknown) {
+  return v === undefined || v === '' || Number.isNaN(Number(v)) ? undefined : Number(v);
+}
+function bool(v: unknown) {
+  return v === undefined || v === '' ? undefined : v !== false && v !== 'false' && v !== '0';
+}
+function first<T>(...values: (T | undefined)[]) {
+  return values.find((v) => v !== undefined);
+}
 
 export function loadSettings(options: Record<string, unknown> = {}, projectDir: string = process.cwd()): Settings {
   const warnings: string[] = [];
   const sources: string[] = [];
-  const read = (path: string, scope: 'user' | 'project') => {
+  function read(path: string, scope: 'user' | 'project') {
     const c = readConfig(path, scope, warnings);
-    if (c) sources.push(path);
+    if (c) {
+      sources.push(path);
+    }
     return c ?? {};
-  };
+  }
   const user = read(userConfigPath(), 'user');
   const project = read(projectConfigPath(projectDir), 'project');
   const o = options as ConfigFile;
@@ -215,9 +231,13 @@ export function loadSettings(options: Record<string, unknown> = {}, projectDir: 
   };
 }
 
-export const cachePath = (s: Settings) => join(s.dataDir, 'judgments.json');
+export function cachePath(s: Settings) {
+  return join(s.dataDir, 'judgments.json');
+}
 
-const mask = (v?: string) => (v === undefined ? undefined : v.length <= 8 ? '****' : `${v.slice(0, 3)}…${v.slice(-4)}`);
+function mask(v?: string) {
+  return v === undefined ? undefined : v.length <= 8 ? '****' : `${v.slice(0, 3)}…${v.slice(-4)}`;
+}
 
 /** For display; secrets masked. */
 export function describeSettings(s: Settings): Record<string, unknown> {
@@ -255,7 +275,9 @@ export const CONFIG_TEMPLATE: ConfigFile = {
 
 export function initUserConfig(): { path: string; created: boolean } {
   const path = userConfigPath();
-  if (existsSync(path)) return { path, created: false };
+  if (existsSync(path)) {
+    return { path, created: false };
+  }
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, `${JSON.stringify(CONFIG_TEMPLATE, null, 2)}\n`, { mode: 0o600 });
   return { path, created: true };

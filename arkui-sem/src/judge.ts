@@ -57,7 +57,9 @@ export class JevBackend implements SystemOneBackend {
         const { answers, usage } = await this.client.systemOne({ state: s, questions });
         return { backend: this.name, answers, latencyMs: performance.now() - t0, usage };
       } catch (e) {
-        if (!/context limit/i.test((e as Error).message)) throw e;
+        if (!/context limit/i.test((e as Error).message)) {
+          throw e;
+        }
       }
     }
     throw new Error(`${this.name}: state exceeds the context limit even after trimming`);
@@ -70,7 +72,9 @@ function without(obj: Record<string, JsonValue>, key: string): Record<string, Js
 
 /** Progressively smaller copies of a slice: no task context, then no spec card, then fewer excerpts. */
 function shrink(state: EntryType): EntryType[] {
-  if (typeof state !== 'object' || state === null || Array.isArray(state)) return [];
+  if (typeof state !== 'object' || state === null || Array.isArray(state)) {
+    return [];
+  }
   const noTask = without(state as Record<string, JsonValue>, 'task_context');
   const noCard = without(noTask, 'spec_card');
   const ex = Array.isArray(noCard.excerpts) ? noCard.excerpts : [];
@@ -98,7 +102,9 @@ export class ClefBackend implements SystemOneBackend {
   }
 
   async systemOne(state: EntryType, questions: Questions): Promise<Result> {
-    if (!this.accountId || !this.apiToken) throw new Error('Cloudflare accountId/apiToken are not configured');
+    if (!this.accountId || !this.apiToken) {
+      throw new Error('Cloudflare accountId/apiToken are not configured');
+    }
     const url = `https://api.cloudflare.com/client/v4/accounts/${this.accountId}/ai/run/${this.name}`;
     const t0 = performance.now();
     const res = await fetch(url, {
@@ -110,7 +116,9 @@ export class ClefBackend implements SystemOneBackend {
       body: JSON.stringify({ state, questions }),
     });
     const body = (await res.json()) as WorkersAIEnvelope;
-    if (!res.ok || !body.success) throw new Error(`${this.name}: ${JSON.stringify(body.errors)}`);
+    if (!res.ok || !body.success) {
+      throw new Error(`${this.name}: ${JSON.stringify(body.errors)}`);
+    }
     return { backend: this.name, answers: body.result.answers, latencyMs: performance.now() - t0 };
   }
 }
@@ -132,7 +140,9 @@ export class OpenRouterClefBackend implements SystemOneBackend {
   }
 
   async systemOne(state: EntryType, questions: Questions): Promise<Result> {
-    if (!this.apiKey) throw new Error('OpenRouter apiKey is not configured');
+    if (!this.apiKey) {
+      throw new Error('OpenRouter apiKey is not configured');
+    }
     const t0 = performance.now();
     const res = await fetch(`${this.baseURL}/decisions`, {
       method: 'POST',
@@ -147,10 +157,11 @@ export class OpenRouterClefBackend implements SystemOneBackend {
       /* reported below */
     }
     const answers = body.answers ?? body.result?.answers;
-    if (!res.ok || !answers)
+    if (!res.ok || !answers) {
       throw new Error(
         `${this.name}: HTTP ${res.status} ${(body.error ? JSON.stringify(body.error) : raw).slice(0, 300).replaceAll(this.apiKey, '***')}`,
       );
+    }
     return { backend: this.name, answers, latencyMs: performance.now() - t0 };
   }
 }
@@ -162,28 +173,38 @@ export class OpenRouterClefBackend implements SystemOneBackend {
 export const MAX_CHOICE_OPTIONS = 255;
 export const MAX_SCORE_LEVELS = 10;
 
-export const text = (e: EntryType | undefined): string =>
-  e == null ? '' : typeof e === 'string' ? e : JSON.stringify(e);
+export function text(e: EntryType | undefined): string {
+  return e == null ? '' : typeof e === 'string' ? e : JSON.stringify(e);
+}
 
 /** Allowed answers per question: noul → "true"/"false"; choice → its labels; score → levels "0".."n-1". */
 export function labelsOf(q: Question): string[] {
-  if (q.type === 'noul') return ['true', 'false'];
-  if (q.type === 'choice') return Object.keys(q.criteria);
+  if (q.type === 'noul') {
+    return ['true', 'false'];
+  }
+  if (q.type === 'choice') {
+    return Object.keys(q.criteria);
+  }
   return q.criteria.map((_, i) => String(i));
 }
 
 /** Same limits as the System One API: 2–255 choices, 2–10 score levels. */
 export function validateQuestions(questions: Questions): void {
   const entries = Object.entries(questions);
-  if (entries.length === 0) throw new Error('questions must be non-empty');
+  if (entries.length === 0) {
+    throw new Error('questions must be non-empty');
+  }
   for (const [id, q] of entries) {
     if (q.type === 'choice') {
       const n = Object.keys(q.criteria).length;
-      if (n < 2 || n > MAX_CHOICE_OPTIONS)
+      if (n < 2 || n > MAX_CHOICE_OPTIONS) {
         throw new Error(`${id}: a choice needs 2–${MAX_CHOICE_OPTIONS} options, got ${n}`);
+      }
     } else if (q.type === 'score') {
       const n = q.criteria.length;
-      if (n < 2 || n > MAX_SCORE_LEVELS) throw new Error(`${id}: a score needs 2–${MAX_SCORE_LEVELS} levels, got ${n}`);
+      if (n < 2 || n > MAX_SCORE_LEVELS) {
+        throw new Error(`${id}: a score needs 2–${MAX_SCORE_LEVELS} levels, got ${n}`);
+      }
     }
   }
 }
@@ -219,9 +240,13 @@ export function normalize(dist: Record<string, number>, labels: string[]): Recor
 export function toAnswer(q: Question, dist: Record<string, number>): Answer {
   const labels = labelsOf(q);
   const p = normalize(dist, labels);
-  if (q.type === 'noul') return { type: 'noul', noul: p.true };
+  if (q.type === 'noul') {
+    return { type: 'noul', noul: p.true };
+  }
   const [best, confidence] = Object.entries(p).reduce((a, b) => (b[1] > a[1] ? b : a));
-  if (q.type === 'choice') return { type: 'choice', choice: best, confidence, probabilities: p };
+  if (q.type === 'choice') {
+    return { type: 'choice', choice: best, confidence, probabilities: p };
+  }
   const legend = Object.fromEntries(q.criteria.map((d, i) => [String(i), d]));
   const score = Object.entries(p).reduce((s, [level, v]) => s + Number(level) * v, 0);
   return { type: 'score', score, confidence, legend, probabilities: p } as ScoreResponse;
@@ -327,8 +352,12 @@ export function buildSlice(
   if (c.field) {
     const f = c.field;
     lines.add(f.line);
-    for (const l of f.readsInBuild.slice(0, 2)) lines.add(l);
-    for (const w of f.writes.slice(0, 3)) lines.add(w.line);
+    for (const l of f.readsInBuild.slice(0, 2)) {
+      lines.add(l);
+    }
+    for (const w of f.writes.slice(0, 3)) {
+      lines.add(w.line);
+    }
     const typeName = f.type?.replace(/\[\]$/, '').trim();
     if (c.rule === 'R2') {
       // No decorators: R2 asks for the intent the decorator should express.
@@ -347,7 +376,7 @@ export function buildSlice(
           : null,
         callbacks_invoked: invokedCallbacks(facts, c),
       };
-    } else
+    } else {
       candidate = {
         kind: c.kind,
         field: f.name,
@@ -368,6 +397,7 @@ export function buildSlice(
         object_link_types_in_file: facts.objectLinkTypes,
         type_declared_in_file: typeName ? facts.declaredClasses.includes(typeName) : null,
       };
+    }
   } else {
     const r = c.resource;
     lines.add(r.acquireLine);
@@ -417,7 +447,9 @@ interface WriteSlice {
   nested_depth?: number;
 }
 
-const strings = (v: unknown): string[] => (Array.isArray(v) ? v.filter((e) => typeof e === 'string') : []);
+function strings(v: unknown): string[] {
+  return Array.isArray(v) ? v.filter((e) => typeof e === 'string') : [];
+}
 
 export class HeuristicBackend implements SystemOneBackend {
   readonly name = 'heuristic';
@@ -445,21 +477,44 @@ export class HeuristicBackend implements SystemOneBackend {
 
         let z = 1.05;
 
-        if (/\bboolean\b/.test(type)) z += 0.7;
-        else if (/\bnumber\b/.test(type)) z += 0.7;
-        else if (/\bstring\b/.test(type)) z -= 0.6;
-        else if (/\[\]|Array</.test(type)) z -= 0.4;
+        if (/\bboolean\b/.test(type)) {
+          z += 0.7;
+        } else if (/\bnumber\b/.test(type)) {
+          z += 0.7;
+        } else if (/\bstring\b/.test(type)) {
+          z -= 0.6;
+        } else if (/\[\]|Array</.test(type)) {
+          z -= 0.4;
+        }
 
-        if (hasEventHandler) z += 1.6;
-        if (onlyLifecycle) z -= 1.8;
-        if (hasNestedMutation) z -= 0.7;
-        if (writes.length > 1) z += 0.3;
-        if (writes.length > 3) z += 0.7;
+        if (hasEventHandler) {
+          z += 1.6;
+        }
+        if (onlyLifecycle) {
+          z -= 1.8;
+        }
+        if (hasNestedMutation) {
+          z -= 0.7;
+        }
+        if (writes.length > 1) {
+          z += 0.3;
+        }
+        if (writes.length > 3) {
+          z += 0.7;
+        }
 
-        if (excerpts.some((e) => /ForEach\s*\(/i.test(e))) z += 1.8;
-        if (excerpts.some((e) => /\.(visibility|opacity)\s*\(/i.test(e))) z += 1.4;
-        if (excerpts.some((e) => /\.(scale|rotate|translate)\s*\(/i.test(e))) z += 0.6;
-        if (excerpts.some((e) => /\.(color|backgroundColor|fontColor|enabled)\s*\(/i.test(e))) z += 0.6;
+        if (excerpts.some((e) => /ForEach\s*\(/i.test(e))) {
+          z += 1.8;
+        }
+        if (excerpts.some((e) => /\.(visibility|opacity)\s*\(/i.test(e))) {
+          z += 1.4;
+        }
+        if (excerpts.some((e) => /\.(scale|rotate|translate)\s*\(/i.test(e))) {
+          z += 0.6;
+        }
+        if (excerpts.some((e) => /\.(color|backgroundColor|fontColor|enabled)\s*\(/i.test(e))) {
+          z += 0.6;
+        }
 
         if (excerpts.some((e) => /Date\.now\(\)|performance\.now\(\)|new Date\(\)|setTimeout|setInterval/.test(e))) {
           z -= 1.4;
@@ -493,9 +548,12 @@ export class HeuristicBackend implements SystemOneBackend {
 
     // Any question this heuristic doesn't model gets an uninformative answer.
     for (const [id, q] of Object.entries(questions)) {
-      if (answers[id]) continue;
-      if (q.type === 'noul') answers[id] = { type: 'noul', noul: 0.5 };
-      else if (q.type === 'choice') {
+      if (answers[id]) {
+        continue;
+      }
+      if (q.type === 'noul') {
+        answers[id] = { type: 'noul', noul: 0.5 };
+      } else if (q.type === 'choice') {
         const labels = Object.keys(q.criteria);
         answers[id] = choiceAnswer(Object.fromEntries(labels.map((l) => [l, 1 / labels.length])));
       } else {
@@ -569,7 +627,9 @@ function exampleFor(questions: Questions): string {
 }
 
 function complete(raw: unknown, questions: Questions): raw is Record<string, Distribution> {
-  if (typeof raw !== 'object' || raw === null) return false;
+  if (typeof raw !== 'object' || raw === null) {
+    return false;
+  }
   const r = raw as Record<string, Record<string, unknown>>;
   return Object.entries(questions).every(
     ([id, q]) => typeof r[id] === 'object' && r[id] !== null && labelsOf(q).every((l) => Number.isFinite(r[id][l])),
@@ -606,16 +666,19 @@ export class DeepSeekBackend implements SystemOneBackend {
     usage: Result['usage'] & object,
   ): Promise<ChatResponse> {
     const key = this.apiKey;
-    if (!key)
+    if (!key) {
       throw new Error(
         'DeepSeek API key is not configured (deepseek.apiKey in ~/.config/arkui-sem/config.json, or DEEPSEEK_API_KEY)',
       );
+    }
     const res = await fetch(`${this.baseURL}${beta ? '/beta' : ''}/chat/completions`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ model: this.model, thinking: { type: 'disabled' }, ...body }),
     });
-    if (!res.ok) throw new Error(`DeepSeek ${res.status}: ${(await res.text()).slice(0, 300)}`);
+    if (!res.ok) {
+      throw new Error(`DeepSeek ${res.status}: ${(await res.text()).slice(0, 300)}`);
+    }
     const data = (await res.json()) as ChatResponse;
     usage.input_tokens += data.usage?.prompt_tokens ?? 0;
     usage.output_tokens += data.usage?.completion_tokens ?? 0;
@@ -678,7 +741,9 @@ export class DeepSeekBackend implements SystemOneBackend {
         const msg = data.choices[0]?.message;
         const raw = msg?.tool_calls?.[0]?.function.arguments ?? msg?.content ?? '';
         const parsed = JSON.parse(raw) as unknown;
-        if (complete(parsed, questions)) return parsed;
+        if (complete(parsed, questions)) {
+          return parsed;
+        }
         lastError = 'response is missing questions or labels';
       } catch (e) {
         lastError = (e as Error).message;

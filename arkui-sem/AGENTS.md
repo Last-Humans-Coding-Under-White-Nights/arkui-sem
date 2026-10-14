@@ -6,8 +6,7 @@ Semantic lint for ArkTS/ArkUI declarative state (opencode v1 plugin + CLI). See 
 
 - `npm install`, then `npm test` (builds `dist/`, runs `test/arkui-sem.test.mjs`).
 - Tests are offline. Run them with `ARKUI_SEM_CONFIG` pointing at a nonexistent file so no user config or key is loaded.
-- `npm run lint` checks lint and formatting with Biome (`biome.json`); `npm run format` fixes what it can. CI and the
-  pre-commit hook (`.githooks/`, enabled by `scripts/setup.mjs`) run the same check.
+- `npm run lint` (Biome), `npm run format` to fix. CI and the pre-commit hook run it too.
 - `dist/` is build output: edit `src/`, never `dist/`. Rebuild before using the CLI or the plugin.
 
 ## API keys
@@ -29,10 +28,8 @@ Semantic lint for ArkTS/ArkUI declarative state (opencode v1 plugin + CLI). See 
 
 ## Conventions
 
-- Follow the [Google TypeScript Style Guide](https://google.github.io/styleguide/tsguide.html); where this file differs (line width), this file wins.
-- ESM TypeScript, strict, Node ≥ 22. Biome sets the format (120 columns, single quotes, semicolons): don't hand-format.
-- No `any` and no non-null `!`: narrow the type, or model the invariant in the type (see `Candidate`).
-- No `_` prefix or suffix on names (Google): drop an unused parameter, or leave out the key you don't want.
+- ESM TypeScript, Node ≥ 22, [Google TypeScript Style Guide](https://google.github.io/styleguide/tsguide.html).
+- No `any`, no non-null `!`.
 - Match the surrounding style.
 - A rule or backend change comes with a test in `test/arkui-sem.test.mjs` that runs offline.
 - Commit messages describe the linter change only.

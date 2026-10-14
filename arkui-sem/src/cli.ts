@@ -18,7 +18,9 @@ const USAGE = `usage:
 
 async function check(rest: string[]) {
   const settings = loadSettings();
-  for (const w of settings.warnings) process.stderr.write(`arkui-sem config: ${w}\n`);
+  for (const w of settings.warnings) {
+    process.stderr.write(`arkui-sem config: ${w}\n`);
+  }
   let format = 'agent';
   const paths: string[] = [];
   for (let i = 0; i < rest.length; i++) {
@@ -32,8 +34,11 @@ async function check(rest: string[]) {
       process.stderr.write(`arkui-sem: ${arg} needs a value\n${USAGE}`);
       process.exit(2);
     }
-    if (arg === '--format') format = value;
-    else settings.backend = value;
+    if (arg === '--format') {
+      format = value;
+    } else {
+      settings.backend = value;
+    }
   }
 
   const files = (paths.length ? paths : ['.']).flatMap((p) => etsFiles(absolute(p, process.cwd())));
@@ -44,10 +49,14 @@ async function check(rest: string[]) {
     judgeTimeoutMs: settings.judgeTimeoutMs,
   });
 
-  if (format === 'json')
+  if (format === 'json') {
     process.stdout.write(`${JSON.stringify({ files: files.length, findings, errors }, null, 2)}\n`);
-  else process.stdout.write(`${formatForAgent(findings) || `arkui-sem: no findings in ${files.length} file(s).`}\n`);
-  if (errors.length) process.stderr.write(`${errors.join('\n')}\n`);
+  } else {
+    process.stdout.write(`${formatForAgent(findings) || `arkui-sem: no findings in ${files.length} file(s).`}\n`);
+  }
+  if (errors.length) {
+    process.stderr.write(`${errors.join('\n')}\n`);
+  }
   process.exit(findings.some((f) => f.band === 'finding') ? 1 : 0);
 }
 
@@ -68,9 +77,11 @@ function config(rest: string[]) {
 }
 
 const [command, ...rest] = process.argv.slice(2);
-if (command === 'check') await check(rest);
-else if (command === 'config') config(rest);
-else {
+if (command === 'check') {
+  await check(rest);
+} else if (command === 'config') {
+  config(rest);
+} else {
   process.stderr.write(USAGE);
   process.exit(2);
 }

@@ -74,11 +74,17 @@ export interface FactExtractor {
 
 const SKIP_DIRS = new Set(['node_modules', 'oh_modules', 'build', 'dist']);
 
-export const absolute = (p: string, base: string) => (isAbsolute(p) ? p : resolve(base, p));
+export function absolute(p: string, base: string) {
+  return isAbsolute(p) ? p : resolve(base, p);
+}
 
 export function etsFiles(path: string): string[] {
-  if (!existsSync(path)) return [];
-  if (statSync(path).isFile()) return path.endsWith('.ets') ? [path] : [];
+  if (!existsSync(path)) {
+    return [];
+  }
+  if (statSync(path).isFile()) {
+    return path.endsWith('.ets') ? [path] : [];
+  }
   return readdirSync(path).flatMap((name) =>
     SKIP_DIRS.has(name) || name.startsWith('.') ? [] : etsFiles(join(path, name)),
   );
@@ -86,7 +92,9 @@ export function etsFiles(path: string): string[] {
 
 export function editedFiles(args: unknown, directory: string): string[] {
   const a = (args ?? {}) as { filePath?: unknown; patchText?: unknown };
-  if (typeof a.filePath === 'string') return [absolute(a.filePath, directory)];
+  if (typeof a.filePath === 'string') {
+    return [absolute(a.filePath, directory)];
+  }
   if (typeof a.patchText === 'string') {
     return [...a.patchText.matchAll(/^\*\*\* (?:Add|Update) File: (.+)$|^\*\*\* Move to: (.+)$/gm)].map((m) =>
       absolute((m[1] ?? m[2]).trim(), directory),
@@ -156,8 +164,9 @@ function blank(text: string): string {
         }
         if (exprDepth.length > 0) {
           const top = exprDepth.length - 1;
-          if (c === '{') exprDepth[top]++;
-          else if (c === '}') {
+          if (c === '{') {
+            exprDepth[top]++;
+          } else if (c === '}') {
             if (exprDepth[top] === 0) {
               exprDepth.pop();
               state = 'tpl';
@@ -175,7 +184,9 @@ function blank(text: string): string {
         if (c === '\n') {
           state = 'code';
           out += c;
-        } else out += ' ';
+        } else {
+          out += ' ';
+        }
         i++;
         continue;
       case 'bc':
@@ -233,7 +244,9 @@ function blank(text: string): string {
   return out;
 }
 
-const count = (s: string, ch: string) => s.split(ch).length - 1;
+function count(s: string, ch: string) {
+  return s.split(ch).length - 1;
+}
 
 /**
  * Methods no code in the component reaches from build()/@Builder (calls or `this.m` references, e.g. `.onClick(this.m)`)
@@ -243,22 +256,26 @@ function externalMethods(methods: Method[], code: string[]): Set<string> {
   const names = new Set(methods.map((m) => m.name));
   const edges = new Map(
     methods.map((m) => {
-      const calls = new Set<string>(),
-        refs = new Set<string>();
+      const calls = new Set<string>();
+      const refs = new Set<string>();
       for (let i = m.firstLine; i <= m.lastLine; i++) {
         for (const h of code[i].matchAll(/this\.(\w+)(\s*\()?/g)) {
-          if (names.has(h[1]) && h[1] !== m.name) (h[2] ? calls : refs).add(h[1]);
+          if (names.has(h[1]) && h[1] !== m.name) {
+            (h[2] ? calls : refs).add(h[1]);
+          }
         }
       }
       return [m.name, { calls, refs }] as const;
     }),
   );
-  const reach = (roots: string[], viaRefs: boolean) => {
-    const seen = new Set(roots),
-      todo = [...roots];
+  function reach(roots: string[], viaRefs: boolean) {
+    const seen = new Set(roots);
+    const todo = [...roots];
     for (let m = todo.pop(); m !== undefined; m = todo.pop()) {
       const e = edges.get(m);
-      if (!e) continue;
+      if (!e) {
+        continue;
+      }
       for (const n of [...e.calls, ...(viaRefs ? e.refs : [])]) {
         if (!seen.has(n) && !LIFECYCLE.has(n)) {
           seen.add(n);
@@ -267,8 +284,10 @@ function externalMethods(methods: Method[], code: string[]): Set<string> {
       }
     }
     return seen;
-  };
-  const roots = (f: (m: Method) => boolean) => methods.filter(f).map((m) => m.name);
+  }
+  function roots(f: (m: Method) => boolean) {
+    return methods.filter(f).map((m) => m.name);
+  }
   const fromBuild = reach(
     roots((m) => m.name === 'build' || m.decorators.includes('@Builder')),
     true,
@@ -316,7 +335,9 @@ export class NaiveExtractor implements FactExtractor {
       depthBefore.push(depth);
       depth += count(line, '{') - count(line, '}');
     }
-    const depthAfter = (i: number) => depthBefore[i] + count(code[i], '{') - count(code[i], '}');
+    function depthAfter(i: number) {
+      return depthBefore[i] + count(code[i], '{') - count(code[i], '}');
+    }
 
     const flat = blank(text);
     const observedClasses = [...flat.matchAll(/@Observed\s+(?:export\s+)?class\s+(\w+)/g)].map((m) => m[1]);
@@ -326,14 +347,20 @@ export class NaiveExtractor implements FactExtractor {
     const components: ComponentFact[] = [];
     for (let i = 0; i < code.length; i++) {
       const sm = code[i].match(/\bstruct\s+(\w+)/);
-      if (!sm) continue;
+      if (!sm) {
+        continue;
+      }
       const header = code.slice(Math.max(0, i - 4), i + 1).join(' ');
       const decos = decoratorsOf(header);
-      if (!decos.includes('@Component') && !decos.includes('@ComponentV2')) continue;
+      if (!decos.includes('@Component') && !decos.includes('@ComponentV2')) {
+        continue;
+      }
 
       const structDepth = depthBefore[i];
       let end = i;
-      while (end + 1 < code.length && !(end > i && depthAfter(end) <= structDepth)) end++;
+      while (end + 1 < code.length && !(end > i && depthAfter(end) <= structDepth)) {
+        end++;
+      }
 
       components.push(
         this.component(
@@ -379,9 +406,11 @@ export class NaiveExtractor implements FactExtractor {
     const arrayClasses: FileFacts['arrayClasses'] = {};
     for (let i = 0; i < code.length; i++) {
       const cm = code[i].match(/\bclass\s+(\w+)\s*(?:<([^>]*)>)?/);
-      if (!cm) continue;
+      if (!cm) {
+        continue;
+      }
       const am = code[i].match(/\bextends\s+Array\s*<(.+?)>\s*(?:implements\b[^{]*)?(?:\{|$)/);
-      if (am)
+      if (am) {
         arrayClasses[cm[1]] = {
           element: am[1].trim(),
           params: (cm[2] ?? '')
@@ -389,16 +418,23 @@ export class NaiveExtractor implements FactExtractor {
             .map((p) => p.trim().split(/\s/)[0])
             .filter(Boolean),
         };
+      }
       const classDepth = depthBefore[i];
       const fields: Record<string, string> = {};
       classFields[cm[1]] = fields;
-      if (code[i].includes('{') && depthAfter(i) <= classDepth) continue; // body opens and closes on the header line
+      if (code[i].includes('{') && depthAfter(i) <= classDepth) {
+        continue; // body opens and closes on the header line
+      }
       let end = i;
       while (end + 1 < code.length && !(end > i && depthAfter(end) <= classDepth)) {
         end++;
-        if (depthBefore[end] !== classDepth + 1) continue;
+        if (depthBefore[end] !== classDepth + 1) {
+          continue;
+        }
         const fm = code[end].replace(/^\s*(?:@\w+(?:\([^)]*\))?\s*)*/, '').match(FIELD);
-        if (fm?.[2]) fields[fm[1]] = fm[2].trim();
+        if (fm?.[2]) {
+          fields[fm[1]] = fm[2].trim();
+        }
       }
       i = end;
     }
@@ -423,11 +459,17 @@ export class NaiveExtractor implements FactExtractor {
     let pendingStart = -1;
 
     for (let i = start + 1; i < end; i++) {
-      if (depthBefore[i] !== structDepth + 1) continue;
+      if (depthBefore[i] !== structDepth + 1) {
+        continue;
+      }
       const line = code[i];
-      if (line.trim() === '') continue;
+      if (line.trim() === '') {
+        continue;
+      }
       if (DECORATOR_ONLY.test(line)) {
-        if (pending.length === 0) pendingStart = i;
+        if (pending.length === 0) {
+          pendingStart = i;
+        }
         pending.push(...decoratorsOf(line));
         continue;
       }
@@ -444,7 +486,9 @@ export class NaiveExtractor implements FactExtractor {
       const mm = rest.match(METHOD);
       if (mm && !/^\s*\w+\s*[?!]?\s*:/.test(rest)) {
         let mEnd = i;
-        while (mEnd + 1 < end && !(depthAfter(mEnd) <= structDepth + 1 && (mEnd > i || code[i].includes('}')))) mEnd++;
+        while (mEnd + 1 < end && !(depthAfter(mEnd) <= structDepth + 1 && (mEnd > i || code[i].includes('}')))) {
+          mEnd++;
+        }
         methods.push({ name: mm[1], decorators, firstLine: i, lastLine: mEnd });
         i = mEnd;
         continue;
@@ -465,9 +509,15 @@ export class NaiveExtractor implements FactExtractor {
     }
 
     const byName = new Map(fields.map((f) => [f.name, f]));
-    for (const m of methods) this.scanMethod(m, raw, code, byName);
+    for (const m of methods) {
+      this.scanMethod(m, raw, code, byName);
+    }
     const external = externalMethods(methods, code);
-    for (const f of fields) for (const w of f.writes) w.external = external.has(w.method);
+    for (const f of fields) {
+      for (const w of f.writes) {
+        w.external = external.has(w.method);
+      }
+    }
 
     return { name, file, line: start + 1, version, fields, resources: this.resources(methods, raw) };
   }
@@ -478,7 +528,9 @@ export class NaiveExtractor implements FactExtractor {
       const line = code[i];
       for (const hit of line.matchAll(/this\.(\w+)/g)) {
         const field = fields.get(hit[1]);
-        if (!field) continue;
+        if (!field) {
+          continue;
+        }
         const after = line.slice((hit.index ?? 0) + hit[0].length);
         const chain = after.match(/^((?:\??\.\w+|\[[^\]]*\])*)/)?.[1] ?? '';
         const tail = after.slice(chain.length);
@@ -489,7 +541,9 @@ export class NaiveExtractor implements FactExtractor {
         const assigned = /^\s*(?:=(?![=>])|\+=|-=|\*=|\/=|%=|\+\+|--)/.test(tail) || /(?:\+\+|--)\s*$/.test(before);
 
         if (!assigned && !mutatingCall) {
-          if (isBuild && !field.readsInBuild.includes(i + 1)) field.readsInBuild.push(i + 1);
+          if (isBuild && !field.readsInBuild.includes(i + 1)) {
+            field.readsInBuild.push(i + 1);
+          }
           continue;
         }
         const nested = mutatingCall ? `${chain.replace(/\.\w+$/, '')}[]` : chain;
@@ -514,10 +568,12 @@ export class NaiveExtractor implements FactExtractor {
   }
 
   private resources(methods: Method[], raw: string[]): ResourceFact[] {
-    const body = (m: Method) => raw.slice(m.firstLine, m.lastLine + 1).join('\n');
+    function body(m: Method) {
+      return raw.slice(m.firstLine, m.lastLine + 1).join('\n');
+    }
     // A lifecycle hook plus the same-component helpers it calls directly (one level), e.g. aboutToDisappear → this.unregisterAll().
-    const scope = (hooks: Set<string>) =>
-      methods
+    function scope(hooks: Set<string>) {
+      return methods
         .filter((m) => hooks.has(m.name))
         .flatMap((h) => [
           { m: h, via: h.name },
@@ -526,22 +582,27 @@ export class NaiveExtractor implements FactExtractor {
             .filter((m): m is Method => m !== undefined)
             .map((m) => ({ m, via: `${h.name}→${m.name}` })),
         ]);
+    }
     const released = scope(RELEASE_HOOKS)
       .map((s) => body(s.m))
       .join('\n');
-    const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    function esc(s: string) {
+      return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    }
     const out: ResourceFact[] = [];
     const seen = new Set<string>();
-    const add = (r: ResourceFact) => {
+    function add(r: ResourceFact) {
       if (!seen.has(r.key)) {
         seen.add(r.key);
         out.push(r);
       }
-    };
+    }
     for (const { m, via } of scope(ACQUIRE_HOOKS)) {
       for (let i = m.firstLine; i <= m.lastLine; i++) {
         const line = raw[i];
-        if (/^\s*(\/\/|\*)/.test(line)) continue;
+        if (/^\s*(\/\/|\*)/.test(line)) {
+          continue;
+        }
         // Event listeners: target.on('event' | CONST.EVENT, handler) ↔ target.off(same event).
         for (const on of line.matchAll(/([\w$.]+(?:\(\))?)\.on\(\s*((['"])[^'"]+\3|[\w$.]+)\s*[,)]/g)) {
           const [, target, event] = on;
@@ -640,29 +701,48 @@ const REACTIVE_V2 = new Set(['@Local', '@Param', '@Provider', '@Consumer']);
 // Fields that never hold renderable state.
 const NON_STATE = new Set(['@BuilderParam', '@Event', '@Require']);
 
-const isReactive = (f: FieldFact) => f.decorators.some((d) => REACTIVE_V1.has(d) || REACTIVE_V2.has(d));
-const isReactiveV1 = (f: FieldFact) => f.decorators.some((d) => REACTIVE_V1.has(d));
-const baseType = (t?: string) =>
-  t
+function isReactive(f: FieldFact) {
+  return f.decorators.some((d) => REACTIVE_V1.has(d) || REACTIVE_V2.has(d));
+}
+function isReactiveV1(f: FieldFact) {
+  return f.decorators.some((d) => REACTIVE_V1.has(d));
+}
+function baseType(t?: string) {
+  return t
     ?.replace(/\[\]$/, '')
     .replace(/\s*\|\s*(undefined|null)$/, '')
     .trim();
+}
 
-const segments = (path?: string) => path?.match(/\??\.\w+|\[[^\]]*\]/g) ?? [];
+function segments(path?: string) {
+  return path?.match(/\??\.\w+|\[[^\]]*\]/g) ?? [];
+}
 
 /** Levels below the field a write reaches: ".title" → 1, ".address.city" → 2, "[i].title" → 2, "[]" (array call) → 1. */
-export const nestedDepth = (path?: string) => segments(path).length;
+export function nestedDepth(path?: string) {
+  return segments(path).length;
+}
 
-const nonNull = (t: string) => t.replace(/\s*\|\s*(?:undefined|null)\b/g, '').trim();
-const className = (t: string) => nonNull(t).replace(/<.*>$/, '').trim();
-const own = <T>(map: Record<string, T>, key: string): T | undefined => (Object.hasOwn(map, key) ? map[key] : undefined);
+function nonNull(t: string) {
+  return t.replace(/\s*\|\s*(?:undefined|null)\b/g, '').trim();
+}
+function className(t: string) {
+  return nonNull(t).replace(/<.*>$/, '').trim();
+}
+function own<T>(map: Record<string, T>, key: string): T | undefined {
+  return Object.hasOwn(map, key) ? map[key] : undefined;
+}
 
 /** Element type of X[], Array<X>, or a file class extending Array<…> (its type parameters bound from t's arguments). */
 function elementType(t: string, facts: FileFacts): string | undefined {
   const builtin = (t.match(/^(.+)\[\]$/) ?? t.match(/^Array<(.+)>$/))?.[1].trim();
-  if (builtin !== undefined) return builtin;
+  if (builtin !== undefined) {
+    return builtin;
+  }
   const cls = own(facts.arrayClasses, className(t));
-  if (!cls) return undefined;
+  if (!cls) {
+    return undefined;
+  }
   const args =
     t
       .match(/<(.+)>$/)?.[1]
@@ -676,7 +756,9 @@ function elementType(t: string, facts: FileFacts): string | undefined {
 function typeAt(fieldType: string | undefined, segs: string[], facts: FileFacts): string | undefined {
   let t = fieldType && nonNull(fieldType);
   for (const s of segs) {
-    if (t === undefined) return undefined;
+    if (t === undefined) {
+      return undefined;
+    }
     const prop = s.match(/^\??\.(\w+)$/)?.[1];
     const fields = own(facts.classFields, className(t));
     const next = prop === undefined ? elementType(t, facts) : fields && own(fields, prop);
@@ -701,7 +783,9 @@ function rendersPath(f: FieldFact, path: string, facts: FileFacts): boolean {
  *  path itself. */
 function seenByObjectLink(f: FieldFact, nestedPath: string, facts: FileFacts): boolean {
   const owner = typeAt(f.type, segments(nestedPath).slice(0, -1), facts);
-  if (owner === undefined) return false;
+  if (owner === undefined) {
+    return false;
+  }
   const cls = className(owner);
   return (
     facts.observedClasses.includes(cls) &&
@@ -714,12 +798,15 @@ function seenByObjectLink(f: FieldFact, nestedPath: string, facts: FileFacts): b
  *  classes, unless an @ObjectLink child sees them. V2: any property write unless the class is @ObservedV2. */
 function unobservedWrites(f: FieldFact, facts: FileFacts) {
   const writes = f.writes.filter((w) => !w.disabledRules.includes('R1'));
-  if (isReactiveV1(f))
+  if (isReactiveV1(f)) {
     return writes.filter(
       (w) => w.nestedPath !== undefined && nestedDepth(w.nestedPath) >= 2 && !seenByObjectLink(f, w.nestedPath, facts),
     );
+  }
   const type = baseType(f.type);
-  if (type !== undefined && facts.observedV2Classes.includes(type)) return [];
+  if (type !== undefined && facts.observedV2Classes.includes(type)) {
+    return [];
+  }
   return writes.filter((w) => w.nestedPath && w.nestedPath !== '[]');
 }
 
@@ -727,7 +814,9 @@ export function candidates(facts: FileFacts): Candidate[] {
   const out: Candidate[] = [];
   for (const c of facts.components) {
     for (const f of c.fields) {
-      if (f.decorators.some((d) => NON_STATE.has(d))) continue;
+      if (f.decorators.some((d) => NON_STATE.has(d))) {
+        continue;
+      }
 
       if (!isReactive(f) && f.readsInBuild.length > 0 && f.writes.length > 0 && !f.disabledRules.includes('R1')) {
         out.push({
@@ -756,8 +845,12 @@ export function candidates(facts: FileFacts): Candidate[] {
       }
     }
     for (const r of c.resources) {
-      if (r.released) continue;
-      if (disabledRulesAt(facts.lines, r.acquireLine - 1).includes('R3')) continue;
+      if (r.released) {
+        continue;
+      }
+      if (disabledRulesAt(facts.lines, r.acquireLine - 1).includes('R3')) {
+        continue;
+      }
       out.push({
         rule: 'R3',
         kind: 'unreleased-resource',
