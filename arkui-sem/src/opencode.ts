@@ -9,7 +9,6 @@ import { cachePath, loadSettings } from "./config.js";
 import { checkFiles, type Finding, formatForAgent } from "./engine.js";
 import { createBackend, type SystemOneBackend } from "./judge.js";
 
-
 const EDIT_TOOLS = new Set(["edit", "write", "multiedit", "patch", "apply_patch"]);
 const MAX_GATE_FOLLOWUPS = 3;
 
@@ -37,13 +36,19 @@ export const ArkuiSemPlugin: Plugin = async ({ client, directory }, options) => 
   const run = async (files: string[]): Promise<Finding[]> => {
     backend ??= await createBackend(settings.backend, settings.credentials);
     const { findings, errors } = await checkFiles(files, {
-      backend, thresholds: settings.thresholds, cachePath: cachePath(settings), judgeTimeoutMs: settings.judgeTimeoutMs,
+      backend,
+      thresholds: settings.thresholds,
+      cachePath: cachePath(settings),
+      judgeTimeoutMs: settings.judgeTimeoutMs,
     });
     if (errors.length) await log("warn", errors.join("; "));
     return findings;
   };
 
-  await log("info", `loaded (backend=${settings.backend}, gate=${settings.gate}, config=${settings.sources.join(", ") || "none"})`);
+  await log(
+    "info",
+    `loaded (backend=${settings.backend}, gate=${settings.gate}, config=${settings.sources.join(", ") || "none"})`,
+  );
   for (const w of settings.warnings) await log("warn", w);
 
   return {
@@ -70,8 +75,14 @@ export const ArkuiSemPlugin: Plugin = async ({ client, directory }, options) => 
       if (!s || s.touched.size === 0) return;
       try {
         const confident = (await run([...s.touched])).filter((f) => f.band === "finding");
-        const key = confident.map((f) => f.fingerprint).sort().join("|");
-        if (confident.length === 0) { s.lastGateKey = ""; return; }
+        const key = confident
+          .map((f) => f.fingerprint)
+          .sort()
+          .join("|");
+        if (confident.length === 0) {
+          s.lastGateKey = "";
+          return;
+        }
         if (key === s.lastGateKey || s.followups >= MAX_GATE_FOLLOWUPS) {
           await log("info", `${confident.length} unresolved finding(s) in session ${id}; gate already used`);
           return;
@@ -81,10 +92,12 @@ export const ArkuiSemPlugin: Plugin = async ({ client, directory }, options) => 
         await client.session.promptAsync({
           path: { id },
           body: {
-            parts: [{
-              type: "text",
-              text: `${formatForAgent(confident, directory)}\n\nBefore finishing: fix these, or if one is intentional, add the disable comment with a reason.`,
-            }],
+            parts: [
+              {
+                type: "text",
+                text: `${formatForAgent(confident, directory)}\n\nBefore finishing: fix these, or if one is intentional, add the disable comment with a reason.`,
+              },
+            ],
           },
         });
       } catch (e) {
@@ -97,7 +110,10 @@ export const ArkuiSemPlugin: Plugin = async ({ client, directory }, options) => 
         description:
           "Check ArkTS/ArkUI .ets files for state-management and lifecycle defects: state that won't re-render the UI, nested mutation of unobserved classes, listeners and timers that are never released. Pass files or directories; defaults to the project.",
         args: {
-          paths: tool.schema.array(tool.schema.string()).optional().describe("Files or directories to check, relative to the project"),
+          paths: tool.schema
+            .array(tool.schema.string())
+            .optional()
+            .describe("Files or directories to check, relative to the project"),
         },
         async execute(args, ctx) {
           const files = (args.paths?.length ? args.paths : ["."]).flatMap((p) => etsFiles(absolute(p, ctx.directory)));
@@ -113,18 +129,28 @@ export const ArkuiSemPlugin: Plugin = async ({ client, directory }, options) => 
         async execute(args, ctx) {
           const file = absolute(args.file, ctx.directory);
           const facts = new NaiveExtractor().extract(file, readFileSync(file, "utf8"));
-          return JSON.stringify({
-            file: relative(ctx.directory, file),
-            observedClasses: facts.observedClasses,
-            components: facts.components.map((c) => ({
-              name: c.name, line: c.line, stateManagement: c.version,
-              fields: c.fields.map((f) => ({
-                name: f.name, line: f.line, decorators: f.decorators, type: f.type ?? null,
-                readInBuildAt: f.readsInBuild, writes: f.writes,
+          return JSON.stringify(
+            {
+              file: relative(ctx.directory, file),
+              observedClasses: facts.observedClasses,
+              components: facts.components.map((c) => ({
+                name: c.name,
+                line: c.line,
+                stateManagement: c.version,
+                fields: c.fields.map((f) => ({
+                  name: f.name,
+                  line: f.line,
+                  decorators: f.decorators,
+                  type: f.type ?? null,
+                  readInBuildAt: f.readsInBuild,
+                  writes: f.writes,
+                })),
+                resources: c.resources,
               })),
-              resources: c.resources,
-            })),
-          }, null, 2);
+            },
+            null,
+            2,
+          );
         },
       }),
     },

@@ -18,7 +18,9 @@ const skillOnly = args.includes("--skill-only");
 const project = args.find((a) => !a.startsWith("--"));
 
 if (!global && !project) {
-  console.error("usage: node scripts/install.mjs <project-dir> [--skill-only|--uninstall]  |  node scripts/install.mjs --global [--uninstall]");
+  console.error(
+    "usage: node scripts/install.mjs <project-dir> [--skill-only|--uninstall]  |  node scripts/install.mjs --global [--uninstall]",
+  );
   process.exit(2);
 }
 

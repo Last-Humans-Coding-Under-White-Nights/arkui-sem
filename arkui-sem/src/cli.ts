@@ -1,6 +1,13 @@
 // The engine outside opencode: shell, pre-commit, CI.
 import { absolute, etsFiles } from "./analysis.js";
-import { cachePath, describeSettings, initUserConfig, loadSettings, projectConfigPath, userConfigPath } from "./config.js";
+import {
+  cachePath,
+  describeSettings,
+  initUserConfig,
+  loadSettings,
+  projectConfigPath,
+  userConfigPath,
+} from "./config.js";
 import { checkFiles, formatForAgent } from "./engine.js";
 import { createBackend } from "./judge.js";
 
@@ -28,7 +35,8 @@ async function check(rest: string[]) {
     judgeTimeoutMs: settings.judgeTimeoutMs,
   });
 
-  if (format === "json") process.stdout.write(`${JSON.stringify({ files: files.length, findings, errors }, null, 2)}\n`);
+  if (format === "json")
+    process.stdout.write(`${JSON.stringify({ files: files.length, findings, errors }, null, 2)}\n`);
   else process.stdout.write(`${formatForAgent(findings) || `arkui-sem: no findings in ${files.length} file(s).`}\n`);
   if (errors.length) process.stderr.write(`${errors.join("\n")}\n`);
   process.exit(findings.some((f) => f.band === "finding") ? 1 : 0);
@@ -37,16 +45,23 @@ async function check(rest: string[]) {
 function config(rest: string[]) {
   if (rest.includes("--init")) {
     const { path, created } = initUserConfig();
-    process.stdout.write(created
-      ? `created ${path}\nEdit it: set cloudflare.accountId and cloudflare.apiToken (and backend). Keep API keys here, not in ${projectConfigPath("<project>")}.\n`
-      : `${path} already exists; not overwritten.\n`);
+    process.stdout.write(
+      created
+        ? `created ${path}\nEdit it: set cloudflare.accountId and cloudflare.apiToken (and backend). Keep API keys here, not in ${projectConfigPath("<project>")}.\n`
+        : `${path} already exists; not overwritten.\n`,
+    );
     return;
   }
   const s = loadSettings();
-  process.stdout.write(`${JSON.stringify({ userConfig: userConfigPath(), projectConfig: projectConfigPath(process.cwd()), resolved: describeSettings(s) }, null, 2)}\n`);
+  process.stdout.write(
+    `${JSON.stringify({ userConfig: userConfigPath(), projectConfig: projectConfigPath(process.cwd()), resolved: describeSettings(s) }, null, 2)}\n`,
+  );
 }
 
 const [command, ...rest] = process.argv.slice(2);
 if (command === "check") await check(rest);
 else if (command === "config") config(rest);
-else { process.stderr.write(USAGE); process.exit(2); }
+else {
+  process.stderr.write(USAGE);
+  process.exit(2);
+}

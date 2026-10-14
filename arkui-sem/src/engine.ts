@@ -4,7 +4,14 @@ import { dirname, relative } from "node:path";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import type { Questions } from "@typesafe-ai/sdk";
 import { buildSlice, Q_R1, Q_R2, Q_R3, type SystemOneBackend } from "./judge.js";
-import { type Candidate, candidates, type FactExtractor, type FileFacts, NaiveExtractor, nestedDepth } from "./analysis.js";
+import {
+  type Candidate,
+  candidates,
+  type FactExtractor,
+  type FileFacts,
+  NaiveExtractor,
+  nestedDepth,
+} from "./analysis.js";
 
 // --- Formatting ---
 
@@ -25,8 +32,13 @@ export function formatForAgent(findings: Finding[], cwd = process.cwd()): string
   for (const f of questions) {
     out.push(`- [${f.rule}?] ${relative(cwd, f.file)}:${f.line} ${f.subject} (${pct(f.p)}, ${f.backend})`);
     out.push(`  ${f.evidence}. Is this intended? If it should behave reactively/be released: ${f.fix}`);
-    const where = f.kind === "nested-write-unobserved" ? "above each write it lists, or above the field's decorators for all of them" : `above line ${f.line}`;
-    out.push(`  If it is intentional, leave it and add \`// arkui-sem-disable-next-line ${f.rule} -- <reason>\` ${where}.`);
+    const where =
+      f.kind === "nested-write-unobserved"
+        ? "above each write it lists, or above the field's decorators for all of them"
+        : `above line ${f.line}`;
+    out.push(
+      `  If it is intentional, leave it and add \`// arkui-sem-disable-next-line ${f.rule} -- <reason>\` ${where}.`,
+    );
   }
   return out.join("\n");
 }
@@ -62,17 +74,29 @@ export interface EngineOptions {
 }
 
 const QUESTIONS: Record<Candidate["rule"], Questions> = { R1: Q_R1, R2: Q_R2, R3: Q_R3 };
-const VIOLATION_LABEL: Record<Candidate["rule"], string> = { R1: "desync_bug", R2: "shared_with_parent", R3: "leak_bug" };
+const VIOLATION_LABEL: Record<Candidate["rule"], string> = {
+  R1: "desync_bug",
+  R2: "shared_with_parent",
+  R3: "leak_bug",
+};
 // R2 label assumes the @Link → @Prop mismatch (shared intent); callers map the other intent × decorator pairs.
 
 class JudgmentCache {
   private entries: Record<string, number> = {};
   constructor(private readonly path?: string) {
     if (!path) return;
-    try { this.entries = JSON.parse(readFileSync(path, "utf8")); } catch { /* empty or missing cache */ }
+    try {
+      this.entries = JSON.parse(readFileSync(path, "utf8"));
+    } catch {
+      /* empty or missing cache */
+    }
   }
-  get(key: string): number | undefined { return this.entries[key]; }
-  set(key: string, p: number) { this.entries[key] = p; }
+  get(key: string): number | undefined {
+    return this.entries[key];
+  }
+  set(key: string, p: number) {
+    this.entries[key] = p;
+  }
   save() {
     if (!this.path) return;
     mkdirSync(dirname(this.path), { recursive: true });
@@ -81,7 +105,10 @@ class JudgmentCache {
 }
 
 function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
-  return Promise.race([p, new Promise<T>((_, reject) => setTimeout(() => reject(new Error(`judge timed out after ${ms} ms`)), ms))]);
+  return Promise.race([
+    p,
+    new Promise<T>((_, reject) => setTimeout(() => reject(new Error(`judge timed out after ${ms} ms`)), ms)),
+  ]);
 }
 
 /** "line 4", "lines 4 and 9", "lines 4, 7 and 9". */
@@ -102,7 +129,10 @@ function describe(facts: FileFacts, c: Candidate): { subject: string; evidence: 
     };
   }
   const f = c.field!;
-  const writes = f.writes.slice(0, 2).map((w) => `${w.context} in ${w.method}() line ${w.line}`).join("; ");
+  const writes = f.writes
+    .slice(0, 2)
+    .map((w) => `${w.context} in ${w.method}() line ${w.line}`)
+    .join("; ");
   if (c.kind === "nested-write-unobserved") {
     const [w, ...rest] = c.writes?.length ? c.writes : f.writes;
     const path = w?.nestedPath ?? "";
@@ -133,7 +163,10 @@ function describe(facts: FileFacts, c: Candidate): { subject: string; evidence: 
   };
 }
 
-export async function checkFiles(files: string[], opts: EngineOptions): Promise<{ findings: Finding[]; errors: string[] }> {
+export async function checkFiles(
+  files: string[],
+  opts: EngineOptions,
+): Promise<{ findings: Finding[]; errors: string[] }> {
   const extractor = opts.extractor ?? new NaiveExtractor();
   const thresholds = opts.thresholds ?? { finding: 0.8, question: 0.5 };
   const cache = new JudgmentCache(opts.cachePath);
@@ -151,7 +184,11 @@ export async function checkFiles(files: string[], opts: EngineOptions): Promise<
     for (const c of candidates(facts)) {
       const slice = buildSlice(facts, c, opts.taskContext);
       const questions = QUESTIONS[c.rule];
-      const key = createHash("sha256").update(opts.backend.name).update(JSON.stringify(slice)).update(Object.keys(questions).join()).digest("hex");
+      const key = createHash("sha256")
+        .update(opts.backend.name)
+        .update(JSON.stringify(slice))
+        .update(Object.keys(questions).join())
+        .digest("hex");
 
       let p: number | null = cache.get(key) ?? null;
       if (p === null) {
@@ -168,9 +205,21 @@ export async function checkFiles(files: string[], opts: EngineOptions): Promise<
       }
 
       // Judge unavailable → degrade to deterministic-only and ask rather than assert.
-      const band: Band | null = p === null ? "question" : p >= thresholds.finding ? "finding" : p >= thresholds.question ? "question" : null;
+      const band: Band | null =
+        p === null ? "question" : p >= thresholds.finding ? "finding" : p >= thresholds.question ? "question" : null;
       if (band === null) continue;
-      findings.push({ fingerprint: c.fingerprint, rule: c.rule, kind: c.kind, file, line: c.line, component: c.component.name, p, band, backend: opts.backend.name, ...describe(facts, c) });
+      findings.push({
+        fingerprint: c.fingerprint,
+        rule: c.rule,
+        kind: c.kind,
+        file,
+        line: c.line,
+        component: c.component.name,
+        p,
+        band,
+        backend: opts.backend.name,
+        ...describe(facts, c),
+      });
     }
   }
   cache.save();

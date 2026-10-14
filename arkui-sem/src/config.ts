@@ -58,7 +58,8 @@ const SCHEMA: Record<string, "string" | "boolean" | "number" | Record<string, "s
 };
 const SECRET_KEYS = new Set(["deepseek.apiKey", "typesafe.apiKey", "cloudflare.apiToken", "openrouter.apiKey"]);
 
-export const userConfigPath = () => process.env.ARKUI_SEM_CONFIG ?? join(homedir(), ".config", "arkui-sem", "config.json");
+export const userConfigPath = () =>
+  process.env.ARKUI_SEM_CONFIG ?? join(homedir(), ".config", "arkui-sem", "config.json");
 export const projectConfigPath = (projectDir: string) => join(projectDir, ".opencode", "arkui-sem.json");
 
 /** Invalid entries are dropped with a warning, never thrown. */
@@ -78,20 +79,34 @@ function readConfig(path: string, scope: "user" | "project", warnings: string[])
   const out: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(raw)) {
     const expected = SCHEMA[key];
-    if (!expected) { warnings.push(`${path}: unknown key "${key}"`); continue; }
+    if (!expected) {
+      warnings.push(`${path}: unknown key "${key}"`);
+      continue;
+    }
     if (typeof expected === "string") {
       if (typeof value === expected) out[key] = value;
       else warnings.push(`${path}: "${key}" should be a ${expected}`);
       continue;
     }
-    if (typeof value !== "object" || value === null || Array.isArray(value)) { warnings.push(`${path}: "${key}" should be an object`); continue; }
+    if (typeof value !== "object" || value === null || Array.isArray(value)) {
+      warnings.push(`${path}: "${key}" should be an object`);
+      continue;
+    }
     const section: Record<string, string> = {};
     for (const [sub, subValue] of Object.entries(value)) {
-      if (!expected[sub]) { warnings.push(`${path}: unknown key "${key}.${sub}"`); continue; }
-      if (typeof subValue !== "string") { warnings.push(`${path}: "${key}.${sub}" should be a string`); continue; }
+      if (!expected[sub]) {
+        warnings.push(`${path}: unknown key "${key}.${sub}"`);
+        continue;
+      }
+      if (typeof subValue !== "string") {
+        warnings.push(`${path}: "${key}.${sub}" should be a string`);
+        continue;
+      }
       section[sub] = subValue;
       if (scope === "project" && SECRET_KEYS.has(`${key}.${sub}`)) {
-        warnings.push(`${path}: "${key}.${sub}" is a secret in a project file that may be committed; move it to ${userConfigPath()}`);
+        warnings.push(
+          `${path}: "${key}.${sub}" is a secret in a project file that may be committed; move it to ${userConfigPath()}`,
+        );
       }
     }
     out[key] = section;
@@ -99,7 +114,10 @@ function readConfig(path: string, scope: "user" | "project", warnings: string[])
   return out as ConfigFile;
 }
 
-const env = (key: string) => { const v = process.env[key]; return v === undefined || v === "" ? undefined : v; };
+const env = (key: string) => {
+  const v = process.env[key];
+  return v === undefined || v === "" ? undefined : v;
+};
 const num = (v: unknown) => (v === undefined || v === "" || Number.isNaN(Number(v)) ? undefined : Number(v));
 const bool = (v: unknown) => (v === undefined || v === "" ? undefined : v !== false && v !== "false" && v !== "0");
 const first = <T>(...values: (T | undefined)[]) => values.find((v) => v !== undefined);
@@ -120,21 +138,76 @@ export function loadSettings(options: Record<string, unknown> = {}, projectDir: 
     backend: first(o.backend, env("ARKUI_SEM_BACKEND"), project.backend, user.backend) ?? "clef",
     gate: first(bool(o.gate), bool(env("ARKUI_SEM_GATE")), project.gate, user.gate) ?? true,
     thresholds: {
-      finding: first(num(o.findingThreshold), num(env("ARKUI_SEM_FINDING_THRESHOLD")), project.findingThreshold, user.findingThreshold) ?? 0.8,
-      question: first(num(o.questionThreshold), num(env("ARKUI_SEM_QUESTION_THRESHOLD")), project.questionThreshold, user.questionThreshold) ?? 0.5,
+      finding:
+        first(
+          num(o.findingThreshold),
+          num(env("ARKUI_SEM_FINDING_THRESHOLD")),
+          project.findingThreshold,
+          user.findingThreshold,
+        ) ?? 0.8,
+      question:
+        first(
+          num(o.questionThreshold),
+          num(env("ARKUI_SEM_QUESTION_THRESHOLD")),
+          project.questionThreshold,
+          user.questionThreshold,
+        ) ?? 0.5,
     },
-    judgeTimeoutMs: first(num(o.judgeTimeoutMs), num(env("ARKUI_SEM_JUDGE_TIMEOUT_MS")), project.judgeTimeoutMs, user.judgeTimeoutMs) ?? 8000,
-    dataDir: first(o.dataDir, env("ARKUI_SEM_DATA_DIR"), project.dataDir, user.dataDir) ?? join(homedir(), ".cache", "arkui-sem"),
+    judgeTimeoutMs:
+      first(
+        num(o.judgeTimeoutMs),
+        num(env("ARKUI_SEM_JUDGE_TIMEOUT_MS")),
+        project.judgeTimeoutMs,
+        user.judgeTimeoutMs,
+      ) ?? 8000,
+    dataDir:
+      first(o.dataDir, env("ARKUI_SEM_DATA_DIR"), project.dataDir, user.dataDir) ??
+      join(homedir(), ".cache", "arkui-sem"),
     credentials: {
-      deepseekApiKey: first(o.deepseek?.apiKey, env("DEEPSEEK_API_KEY"), project.deepseek?.apiKey, user.deepseek?.apiKey),
-      deepseekBaseUrl: first(o.deepseek?.baseUrl, env("DEEPSEEK_BASE_URL"), project.deepseek?.baseUrl, user.deepseek?.baseUrl),
-      typesafeApiKey: first(o.typesafe?.apiKey, env("TYPESAFE_API_KEY"), project.typesafe?.apiKey, user.typesafe?.apiKey),
+      deepseekApiKey: first(
+        o.deepseek?.apiKey,
+        env("DEEPSEEK_API_KEY"),
+        project.deepseek?.apiKey,
+        user.deepseek?.apiKey,
+      ),
+      deepseekBaseUrl: first(
+        o.deepseek?.baseUrl,
+        env("DEEPSEEK_BASE_URL"),
+        project.deepseek?.baseUrl,
+        user.deepseek?.baseUrl,
+      ),
+      typesafeApiKey: first(
+        o.typesafe?.apiKey,
+        env("TYPESAFE_API_KEY"),
+        project.typesafe?.apiKey,
+        user.typesafe?.apiKey,
+      ),
       layaBaseUrl: first(o.laya?.baseUrl, env("LAYA_BASE_URL"), project.laya?.baseUrl, user.laya?.baseUrl),
       layaModel: first(o.laya?.model, env("LAYA_MODEL"), project.laya?.model, user.laya?.model),
-      cloudflareAccountId: first(o.cloudflare?.accountId, env("CLOUDFLARE_ACCOUNT_ID"), project.cloudflare?.accountId, user.cloudflare?.accountId),
-      cloudflareApiToken: first(o.cloudflare?.apiToken, env("CLOUDFLARE_API_TOKEN"), project.cloudflare?.apiToken, user.cloudflare?.apiToken),
-      openrouterApiKey: first(o.openrouter?.apiKey, env("OPENROUTER_API_KEY"), project.openrouter?.apiKey, user.openrouter?.apiKey),
-      openrouterBaseUrl: first(o.openrouter?.baseUrl, env("OPENROUTER_BASE_URL"), project.openrouter?.baseUrl, user.openrouter?.baseUrl),
+      cloudflareAccountId: first(
+        o.cloudflare?.accountId,
+        env("CLOUDFLARE_ACCOUNT_ID"),
+        project.cloudflare?.accountId,
+        user.cloudflare?.accountId,
+      ),
+      cloudflareApiToken: first(
+        o.cloudflare?.apiToken,
+        env("CLOUDFLARE_API_TOKEN"),
+        project.cloudflare?.apiToken,
+        user.cloudflare?.apiToken,
+      ),
+      openrouterApiKey: first(
+        o.openrouter?.apiKey,
+        env("OPENROUTER_API_KEY"),
+        project.openrouter?.apiKey,
+        user.openrouter?.apiKey,
+      ),
+      openrouterBaseUrl: first(
+        o.openrouter?.baseUrl,
+        env("OPENROUTER_BASE_URL"),
+        project.openrouter?.baseUrl,
+        user.openrouter?.baseUrl,
+      ),
     },
     sources,
     warnings,
@@ -149,15 +222,24 @@ const mask = (v?: string) => (v === undefined ? undefined : v.length <= 8 ? "***
 export function describeSettings(s: Settings): Record<string, unknown> {
   const c = s.credentials;
   return {
-    backend: s.backend, gate: s.gate, thresholds: s.thresholds, judgeTimeoutMs: s.judgeTimeoutMs, dataDir: s.dataDir,
+    backend: s.backend,
+    gate: s.gate,
+    thresholds: s.thresholds,
+    judgeTimeoutMs: s.judgeTimeoutMs,
+    dataDir: s.dataDir,
     credentials: {
-      deepseekApiKey: mask(c.deepseekApiKey), deepseekBaseUrl: c.deepseekBaseUrl,
+      deepseekApiKey: mask(c.deepseekApiKey),
+      deepseekBaseUrl: c.deepseekBaseUrl,
       typesafeApiKey: mask(c.typesafeApiKey),
-      layaBaseUrl: c.layaBaseUrl, layaModel: c.layaModel,
-      cloudflareAccountId: c.cloudflareAccountId, cloudflareApiToken: mask(c.cloudflareApiToken),
-      openrouterApiKey: mask(c.openrouterApiKey), openrouterBaseUrl: c.openrouterBaseUrl,
+      layaBaseUrl: c.layaBaseUrl,
+      layaModel: c.layaModel,
+      cloudflareAccountId: c.cloudflareAccountId,
+      cloudflareApiToken: mask(c.cloudflareApiToken),
+      openrouterApiKey: mask(c.openrouterApiKey),
+      openrouterBaseUrl: c.openrouterBaseUrl,
     },
-    sources: s.sources, warnings: s.warnings,
+    sources: s.sources,
+    warnings: s.warnings,
   };
 }
 

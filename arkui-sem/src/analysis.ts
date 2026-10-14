@@ -79,15 +79,18 @@ export const absolute = (p: string, base: string) => (isAbsolute(p) ? p : resolv
 export function etsFiles(path: string): string[] {
   if (!existsSync(path)) return [];
   if (statSync(path).isFile()) return path.endsWith(".ets") ? [path] : [];
-  return readdirSync(path).flatMap((name) => (SKIP_DIRS.has(name) || name.startsWith(".") ? [] : etsFiles(join(path, name))));
+  return readdirSync(path).flatMap((name) =>
+    SKIP_DIRS.has(name) || name.startsWith(".") ? [] : etsFiles(join(path, name)),
+  );
 }
 
 export function editedFiles(args: unknown, directory: string): string[] {
   const a = (args ?? {}) as { filePath?: unknown; patchText?: unknown };
   if (typeof a.filePath === "string") return [absolute(a.filePath, directory)];
   if (typeof a.patchText === "string") {
-    return [...a.patchText.matchAll(/^\*\*\* (?:Add|Update) File: (.+)$|^\*\*\* Move to: (.+)$/gm)]
-      .map((m) => absolute((m[1] ?? m[2]).trim(), directory));
+    return [...a.patchText.matchAll(/^\*\*\* (?:Add|Update) File: (.+)$|^\*\*\* Move to: (.+)$/gm)].map((m) =>
+      absolute((m[1] ?? m[2]).trim(), directory),
+    );
   }
   return [];
 }
@@ -97,12 +100,30 @@ export function editedFiles(args: unknown, directory: string): string[] {
 // Text-based and single-file: no type or alias analysis. FactExtractor lets a real analyzer replace it.
 
 const LIFECYCLE = new Set([
-  "aboutToAppear", "aboutToDisappear", "onPageShow", "onPageHide", "onBackPress",
-  "aboutToReuse", "aboutToRecycle", "onDidBuild",
+  "aboutToAppear",
+  "aboutToDisappear",
+  "onPageShow",
+  "onPageHide",
+  "onBackPress",
+  "aboutToReuse",
+  "aboutToRecycle",
+  "onDidBuild",
 ]);
 const ACQUIRE_HOOKS = new Set(["aboutToAppear", "onPageShow", "aboutToReuse", "onDidBuild"]);
 const RELEASE_HOOKS = new Set(["aboutToDisappear", "onPageHide", "aboutToRecycle"]);
-const MUTATING_CALLS = new Set(["push", "pop", "splice", "shift", "unshift", "sort", "reverse", "fill", "set", "delete", "clear"]);
+const MUTATING_CALLS = new Set([
+  "push",
+  "pop",
+  "splice",
+  "shift",
+  "unshift",
+  "sort",
+  "reverse",
+  "fill",
+  "set",
+  "delete",
+  "clear",
+]);
 const ASYNC_MARKERS = /\.then\(|\bawait\b|setTimeout\(|setInterval\(|\.on\(|subscribe\(/;
 
 /** Blank out comments and string contents (keeping `${…}` expressions), preserving offsets and newlines. */
@@ -115,36 +136,98 @@ function blank(text: string): string {
     const d = text[i + 1];
     switch (state) {
       case "code":
-        if (c === "/" && d === "/") { state = "lc"; out += "  "; i += 2; continue; }
-        if (c === "/" && d === "*") { state = "bc"; out += "  "; i += 2; continue; }
-        if (c === "'" || c === '"' || c === "`") { state = c === "'" ? "sq" : c === '"' ? "dq" : "tpl"; out += c; i++; continue; }
+        if (c === "/" && d === "/") {
+          state = "lc";
+          out += "  ";
+          i += 2;
+          continue;
+        }
+        if (c === "/" && d === "*") {
+          state = "bc";
+          out += "  ";
+          i += 2;
+          continue;
+        }
+        if (c === "'" || c === '"' || c === "`") {
+          state = c === "'" ? "sq" : c === '"' ? "dq" : "tpl";
+          out += c;
+          i++;
+          continue;
+        }
         if (exprDepth.length > 0) {
           const top = exprDepth.length - 1;
           if (c === "{") exprDepth[top]++;
           else if (c === "}") {
-            if (exprDepth[top] === 0) { exprDepth.pop(); state = "tpl"; out += c; i++; continue; }
+            if (exprDepth[top] === 0) {
+              exprDepth.pop();
+              state = "tpl";
+              out += c;
+              i++;
+              continue;
+            }
             exprDepth[top]--;
           }
         }
-        out += c; i++; continue;
+        out += c;
+        i++;
+        continue;
       case "lc":
-        if (c === "\n") { state = "code"; out += c; } else out += " ";
-        i++; continue;
+        if (c === "\n") {
+          state = "code";
+          out += c;
+        } else out += " ";
+        i++;
+        continue;
       case "bc":
-        if (c === "*" && d === "/") { state = "code"; out += "  "; i += 2; continue; }
-        out += c === "\n" ? "\n" : " "; i++; continue;
+        if (c === "*" && d === "/") {
+          state = "code";
+          out += "  ";
+          i += 2;
+          continue;
+        }
+        out += c === "\n" ? "\n" : " ";
+        i++;
+        continue;
       case "sq":
       case "dq": {
         const quote = state === "sq" ? "'" : '"';
-        if (c === "\\") { out += d === "\n" ? " \n" : "  "; i += 2; continue; }
-        if (c === quote || c === "\n") { state = "code"; out += c; i++; continue; }
-        out += " "; i++; continue;
+        if (c === "\\") {
+          out += d === "\n" ? " \n" : "  ";
+          i += 2;
+          continue;
+        }
+        if (c === quote || c === "\n") {
+          state = "code";
+          out += c;
+          i++;
+          continue;
+        }
+        out += " ";
+        i++;
+        continue;
       }
       case "tpl":
-        if (c === "\\") { out += d === "\n" ? " \n" : "  "; i += 2; continue; }
-        if (c === "`") { state = "code"; out += c; i++; continue; }
-        if (c === "$" && d === "{") { out += "${"; i += 2; state = "code"; exprDepth.push(0); continue; }
-        out += c === "\n" ? "\n" : " "; i++; continue;
+        if (c === "\\") {
+          out += d === "\n" ? " \n" : "  ";
+          i += 2;
+          continue;
+        }
+        if (c === "`") {
+          state = "code";
+          out += c;
+          i++;
+          continue;
+        }
+        if (c === "$" && d === "{") {
+          out += "${";
+          i += 2;
+          state = "code";
+          exprDepth.push(0);
+          continue;
+        }
+        out += c === "\n" ? "\n" : " ";
+        i++;
+        continue;
     }
   }
   return out;
@@ -158,28 +241,41 @@ const count = (s: string, ch: string) => s.split(ch).length - 1;
  */
 function externalMethods(methods: Method[], code: string[]): Set<string> {
   const names = new Set(methods.map((m) => m.name));
-  const edges = new Map(methods.map((m) => {
-    const calls = new Set<string>(), refs = new Set<string>();
-    for (let i = m.firstLine; i <= m.lastLine; i++) {
-      for (const h of code[i].matchAll(/this\.(\w+)(\s*\()?/g)) {
-        if (names.has(h[1]) && h[1] !== m.name) (h[2] ? calls : refs).add(h[1]);
+  const edges = new Map(
+    methods.map((m) => {
+      const calls = new Set<string>(),
+        refs = new Set<string>();
+      for (let i = m.firstLine; i <= m.lastLine; i++) {
+        for (const h of code[i].matchAll(/this\.(\w+)(\s*\()?/g)) {
+          if (names.has(h[1]) && h[1] !== m.name) (h[2] ? calls : refs).add(h[1]);
+        }
       }
-    }
-    return [m.name, { calls, refs }] as const;
-  }));
+      return [m.name, { calls, refs }] as const;
+    }),
+  );
   const reach = (roots: string[], viaRefs: boolean) => {
-    const seen = new Set(roots), todo = [...roots];
+    const seen = new Set(roots),
+      todo = [...roots];
     while (todo.length) {
       const e = edges.get(todo.pop()!)!;
       for (const n of [...e.calls, ...(viaRefs ? e.refs : [])]) {
-        if (!seen.has(n) && !LIFECYCLE.has(n)) { seen.add(n); todo.push(n); }
+        if (!seen.has(n) && !LIFECYCLE.has(n)) {
+          seen.add(n);
+          todo.push(n);
+        }
       }
     }
     return seen;
   };
   const roots = (f: (m: Method) => boolean) => methods.filter(f).map((m) => m.name);
-  const fromBuild = reach(roots((m) => m.name === "build" || m.decorators.includes("@Builder")), true);
-  const fromLifecycle = reach(roots((m) => LIFECYCLE.has(m.name)), false);
+  const fromBuild = reach(
+    roots((m) => m.name === "build" || m.decorators.includes("@Builder")),
+    true,
+  );
+  const fromLifecycle = reach(
+    roots((m) => LIFECYCLE.has(m.name)),
+    false,
+  );
   return new Set([...names].filter((n) => !LIFECYCLE.has(n) && !fromBuild.has(n) && !fromLifecycle.has(n)));
 }
 
@@ -193,7 +289,8 @@ interface Method {
 const DECORATOR = /@\w+(?:\([^)]*\))?/g;
 const DECORATOR_ONLY = /^\s*(?:@\w+(?:\([^)]*\))?\s*)+$/;
 const METHOD = /^\s*(?:(?:private|public|protected|static|async)\s+)*(\w+)\s*(?:<[^>]*>)?\s*\(/;
-const FIELD = /^\s*(?:(?:private|public|protected|static|readonly)\s+)*(\w+)\s*[?!]?\s*(?::\s*([^=;]+?))?\s*(=.*)?;?\s*$/;
+const FIELD =
+  /^\s*(?:(?:private|public|protected|static|readonly)\s+)*(\w+)\s*[?!]?\s*(?::\s*([^=;]+?))?\s*(=.*)?;?\s*$/;
 
 function decoratorsOf(s: string): string[] {
   return (s.match(DECORATOR) ?? []).map((d) => d.replace(/\(.*$/, ""));
@@ -237,23 +334,60 @@ export class NaiveExtractor implements FactExtractor {
       let end = i;
       while (end + 1 < code.length && !(end > i && depthAfter(end) <= structDepth)) end++;
 
-      components.push(this.component(file, sm[1], decos.includes("@ComponentV2") ? "V2" : "V1", i, end, structDepth, raw, code, depthBefore, depthAfter));
+      components.push(
+        this.component(
+          file,
+          sm[1],
+          decos.includes("@ComponentV2") ? "V2" : "V1",
+          i,
+          end,
+          structDepth,
+          raw,
+          code,
+          depthBefore,
+          depthAfter,
+        ),
+      );
       i = end;
     }
     const objectLinkTypes = components.flatMap((c) =>
-      c.fields.filter((f) => f.decorators.includes("@ObjectLink") && f.type).map((f) => f.type!.replace(/\[\]$/, "").trim()));
+      c.fields
+        .filter((f) => f.decorators.includes("@ObjectLink") && f.type)
+        .map((f) => f.type!.replace(/\[\]$/, "").trim()),
+    );
     const { classFields, arrayClasses } = this.classes(code, depthBefore, depthAfter);
-    return { file, components, observedClasses, observedV2Classes, objectLinkTypes, declaredClasses, classFields, arrayClasses, lines: raw };
+    return {
+      file,
+      components,
+      observedClasses,
+      observedV2Classes,
+      objectLinkTypes,
+      declaredClasses,
+      classFields,
+      arrayClasses,
+      lines: raw,
+    };
   }
 
-  private classes(code: string[], depthBefore: number[], depthAfter: (i: number) => number): Pick<FileFacts, "classFields" | "arrayClasses"> {
+  private classes(
+    code: string[],
+    depthBefore: number[],
+    depthAfter: (i: number) => number,
+  ): Pick<FileFacts, "classFields" | "arrayClasses"> {
     const classFields: FileFacts["classFields"] = {};
     const arrayClasses: FileFacts["arrayClasses"] = {};
     for (let i = 0; i < code.length; i++) {
       const cm = code[i].match(/\bclass\s+(\w+)\s*(?:<([^>]*)>)?/);
       if (!cm) continue;
       const am = code[i].match(/\bextends\s+Array\s*<(.+?)>\s*(?:implements\b[^{]*)?(?:\{|$)/);
-      if (am) arrayClasses[cm[1]] = { element: am[1].trim(), params: (cm[2] ?? "").split(",").map((p) => p.trim().split(/\s/)[0]).filter(Boolean) };
+      if (am)
+        arrayClasses[cm[1]] = {
+          element: am[1].trim(),
+          params: (cm[2] ?? "")
+            .split(",")
+            .map((p) => p.trim().split(/\s/)[0])
+            .filter(Boolean),
+        };
       const classDepth = depthBefore[i];
       const fields: Record<string, string> = {};
       classFields[cm[1]] = fields;
@@ -271,8 +405,16 @@ export class NaiveExtractor implements FactExtractor {
   }
 
   private component(
-    file: string, name: string, version: "V1" | "V2", start: number, end: number, structDepth: number,
-    raw: string[], code: string[], depthBefore: number[], depthAfter: (i: number) => number,
+    file: string,
+    name: string,
+    version: "V1" | "V2",
+    start: number,
+    end: number,
+    structDepth: number,
+    raw: string[],
+    code: string[],
+    depthBefore: number[],
+    depthAfter: (i: number) => number,
   ): ComponentFact {
     const fields: FieldFact[] = [];
     const methods: Method[] = [];
@@ -293,7 +435,9 @@ export class NaiveExtractor implements FactExtractor {
       const rest = line.replace(/^\s*(?:@\w+(?:\([^)]*\))?\s*)*/, "");
       const decorators = [...pending, ...inline];
       // The disable comment may sit above the decorator lines or directly above the field name.
-      const disabledRules = [...new Set([...disabledRulesAt(raw, i), ...(pending.length ? disabledRulesAt(raw, pendingStart) : [])])];
+      const disabledRules = [
+        ...new Set([...disabledRulesAt(raw, i), ...(pending.length ? disabledRulesAt(raw, pendingStart) : [])]),
+      ];
       pending = [];
 
       const mm = rest.match(METHOD);
@@ -307,8 +451,14 @@ export class NaiveExtractor implements FactExtractor {
       const fm = rest.match(FIELD);
       if (fm) {
         fields.push({
-          name: fm[1], line: i + 1, decorators, type: fm[2]?.trim(), hasInitializer: fm[3] !== undefined,
-          readsInBuild: [], writes: [], disabledRules,
+          name: fm[1],
+          line: i + 1,
+          decorators,
+          type: fm[2]?.trim(),
+          hasInitializer: fm[3] !== undefined,
+          readsInBuild: [],
+          writes: [],
+          disabledRules,
         });
       }
     }
@@ -344,11 +494,20 @@ export class NaiveExtractor implements FactExtractor {
         const nested = mutatingCall ? chain.replace(/\.\w+$/, "") + "[]" : chain;
         const window = code.slice(Math.max(m.firstLine, i - 3), i + 1).join("\n");
         const isAsync = ASYNC_MARKERS.test(window);
-        const context: WriteContext = isAsync ? "async-callback"
-          : isBuild ? "build-closure"
-          : LIFECYCLE.has(m.name) ? "lifecycle"
-          : "method";
-        field.writes.push({ line: i + 1, context, method: m.name, nestedPath: nested || undefined, disabledRules: disabledRulesAt(raw, i) });
+        const context: WriteContext = isAsync
+          ? "async-callback"
+          : isBuild
+            ? "build-closure"
+            : LIFECYCLE.has(m.name)
+              ? "lifecycle"
+              : "method";
+        field.writes.push({
+          line: i + 1,
+          context,
+          method: m.name,
+          nestedPath: nested || undefined,
+          disabledRules: disabledRulesAt(raw, i),
+        });
       }
     }
   }
@@ -356,18 +515,28 @@ export class NaiveExtractor implements FactExtractor {
   private resources(methods: Method[], raw: string[]): ResourceFact[] {
     const body = (m: Method) => raw.slice(m.firstLine, m.lastLine + 1).join("\n");
     // A lifecycle hook plus the same-component helpers it calls directly (one level), e.g. aboutToDisappear → this.unregisterAll().
-    const scope = (hooks: Set<string>) => methods.filter((m) => hooks.has(m.name)).flatMap((h) => [
-      { m: h, via: h.name },
-      ...[...new Set([...body(h).matchAll(/\bthis\.(\w+)\s*\(/g)].map((x) => x[1]))]
-        .map((n) => methods.find((m) => m.name === n && !LIFECYCLE.has(n)))
-        .filter((m): m is Method => m !== undefined)
-        .map((m) => ({ m, via: `${h.name}→${m.name}` })),
-    ]);
-    const released = scope(RELEASE_HOOKS).map((s) => body(s.m)).join("\n");
+    const scope = (hooks: Set<string>) =>
+      methods
+        .filter((m) => hooks.has(m.name))
+        .flatMap((h) => [
+          { m: h, via: h.name },
+          ...[...new Set([...body(h).matchAll(/\bthis\.(\w+)\s*\(/g)].map((x) => x[1]))]
+            .map((n) => methods.find((m) => m.name === n && !LIFECYCLE.has(n)))
+            .filter((m): m is Method => m !== undefined)
+            .map((m) => ({ m, via: `${h.name}→${m.name}` })),
+        ]);
+    const released = scope(RELEASE_HOOKS)
+      .map((s) => body(s.m))
+      .join("\n");
     const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     const out: ResourceFact[] = [];
     const seen = new Set<string>();
-    const add = (r: ResourceFact) => { if (!seen.has(r.key)) { seen.add(r.key); out.push(r); } };
+    const add = (r: ResourceFact) => {
+      if (!seen.has(r.key)) {
+        seen.add(r.key);
+        out.push(r);
+      }
+    };
     for (const { m, via } of scope(ACQUIRE_HOOKS)) {
       for (let i = m.firstLine; i <= m.lastLine; i++) {
         const line = raw[i];
@@ -377,23 +546,50 @@ export class NaiveExtractor implements FactExtractor {
           const [, target, event] = on;
           const name = event.replace(/^['"]|['"]$/g, "");
           const off = new RegExp(`\\.off\\(\\s*(['"]${esc(name)}['"]|${esc(name)})\\s*[,)]`);
-          add({ kind: "listener", key: `${target}.on:${name}`, acquireLine: i + 1, acquireIn: via, released: off.test(released),
-            release: `${target}.off(${event}, <same handler>)` });
+          add({
+            kind: "listener",
+            key: `${target}.on:${name}`,
+            acquireLine: i + 1,
+            acquireIn: via,
+            released: off.test(released),
+            release: `${target}.off(${event}, <same handler>)`,
+          });
         }
         // Registrations: registerX ↔ unregisterX, subscribe ↔ unsubscribe, addXListener/Observer ↔ removeX.
-        for (const reg of line.matchAll(/([\w$.]+(?:\(\))?)\.(register\w*|subscribe\w*|add\w*(?:Listener|Observer|Callback))\(/g)) {
+        for (const reg of line.matchAll(
+          /([\w$.]+(?:\(\))?)\.(register\w*|subscribe\w*|add\w*(?:Listener|Observer|Callback))\(/g,
+        )) {
           const [, target, method] = reg;
           const undo = method.startsWith("add") ? `remove${method.slice(3)}` : `un${method}`;
           const releasedHere = new RegExp(`\\b${esc(undo)}\\s*\\(`, "i").test(released);
-          add({ kind: "subscription", key: `${target}.${method}`, acquireLine: i + 1, acquireIn: via, released: releasedHere,
-            release: `${target}.${undo}(...)` });
+          add({
+            kind: "subscription",
+            key: `${target}.${method}`,
+            acquireLine: i + 1,
+            acquireIn: via,
+            released: releasedHere,
+            release: `${target}.${undo}(...)`,
+          });
         }
         const timer = line.match(/(this\.\w+)\s*=\s*setInterval\(/);
         if (timer) {
-          add({ kind: "timer", key: `timer:${timer[1]}`, acquireLine: i + 1, acquireIn: via, released: released.includes(`clearInterval(${timer[1]}`),
-            release: `clearInterval(${timer[1]})` });
+          add({
+            kind: "timer",
+            key: `timer:${timer[1]}`,
+            acquireLine: i + 1,
+            acquireIn: via,
+            released: released.includes(`clearInterval(${timer[1]}`),
+            release: `clearInterval(${timer[1]})`,
+          });
         } else if (/\bsetInterval\(/.test(line)) {
-          add({ kind: "timer", key: `timer:anonymous@${i + 1}`, acquireLine: i + 1, acquireIn: via, released: false, release: "clearInterval(<the interval id>)" });
+          add({
+            kind: "timer",
+            key: `timer:anonymous@${i + 1}`,
+            acquireLine: i + 1,
+            acquireIn: via,
+            released: false,
+            release: "clearInterval(<the interval id>)",
+          });
         }
       }
     }
@@ -407,9 +603,9 @@ export type RuleId = "R1" | "R2" | "R3";
 
 export type CandidateKind =
   | "undecorated-mutated-rendered" // R1: plain member written after init and read in build()
-  | "nested-write-unobserved"      // R1: in-place write deeper than the state decorator observes
-  | "ownership-intent"             // R2: passed-in field; candidates() does not emit it (callers build it)
-  | "unreleased-resource";         // R3: acquired in a lifecycle hook, no matching release
+  | "nested-write-unobserved" // R1: in-place write deeper than the state decorator observes
+  | "ownership-intent" // R2: passed-in field; candidates() does not emit it (callers build it)
+  | "unreleased-resource"; // R3: acquired in a lifecycle hook, no matching release
 
 export interface Candidate {
   rule: RuleId;
@@ -426,8 +622,16 @@ export interface Candidate {
 }
 
 const REACTIVE_V1 = new Set([
-  "@State", "@Prop", "@Link", "@ObjectLink", "@Provide", "@Consume",
-  "@StorageLink", "@StorageProp", "@LocalStorageLink", "@LocalStorageProp",
+  "@State",
+  "@Prop",
+  "@Link",
+  "@ObjectLink",
+  "@Provide",
+  "@Consume",
+  "@StorageLink",
+  "@StorageProp",
+  "@LocalStorageLink",
+  "@LocalStorageProp",
 ]);
 const REACTIVE_V2 = new Set(["@Local", "@Param", "@Provider", "@Consumer"]);
 // Fields that never hold renderable state.
@@ -435,7 +639,11 @@ const NON_STATE = new Set(["@BuilderParam", "@Event", "@Require"]);
 
 const isReactive = (f: FieldFact) => f.decorators.some((d) => REACTIVE_V1.has(d) || REACTIVE_V2.has(d));
 const isReactiveV1 = (f: FieldFact) => f.decorators.some((d) => REACTIVE_V1.has(d));
-const baseType = (t?: string) => t?.replace(/\[\]$/, "").replace(/\s*\|\s*(undefined|null)$/, "").trim();
+const baseType = (t?: string) =>
+  t
+    ?.replace(/\[\]$/, "")
+    .replace(/\s*\|\s*(undefined|null)$/, "")
+    .trim();
 
 const segments = (path?: string) => path?.match(/\??\.\w+|\[[^\]]*\]/g) ?? [];
 
@@ -452,7 +660,11 @@ function elementType(t: string, facts: FileFacts): string | undefined {
   if (builtin !== undefined) return builtin;
   const cls = own(facts.arrayClasses, className(t));
   if (!cls) return undefined;
-  const args = t.match(/<(.+)>$/)?.[1].split(",").map((a) => a.trim()) ?? [];
+  const args =
+    t
+      .match(/<(.+)>$/)?.[1]
+      .split(",")
+      .map((a) => a.trim()) ?? [];
   const param = cls.params.indexOf(cls.element);
   return param < 0 ? cls.element : args[param];
 }
@@ -488,8 +700,11 @@ function seenByObjectLink(f: FieldFact, w: WriteFact, facts: FileFacts): boolean
   const owner = typeAt(f.type, segments(w.nestedPath).slice(0, -1), facts);
   if (owner === undefined) return false;
   const cls = className(owner);
-  return facts.observedClasses.includes(cls) && facts.objectLinkTypes.some((t) => className(t) === cls)
-    && !rendersPath(f, w.nestedPath!, facts);
+  return (
+    facts.observedClasses.includes(cls) &&
+    facts.objectLinkTypes.some((t) => className(t) === cls) &&
+    !rendersPath(f, w.nestedPath!, facts)
+  );
 }
 
 /** Writes the decorator can't see, minus writes under a disable comment. V1: deeper than the first layer, even with @Observed
@@ -510,16 +725,27 @@ export function candidates(facts: FileFacts): Candidate[] {
 
       if (!isReactive(f) && f.readsInBuild.length > 0 && f.writes.length > 0 && !f.disabledRules.includes("R1")) {
         out.push({
-          rule: "R1", kind: "undecorated-mutated-rendered", file: facts.file, component: c, field: f,
-          line: f.line, fingerprint: `${facts.file}#${c.name}.${f.name}#R1-undecorated`,
+          rule: "R1",
+          kind: "undecorated-mutated-rendered",
+          file: facts.file,
+          component: c,
+          field: f,
+          line: f.line,
+          fingerprint: `${facts.file}#${c.name}.${f.name}#R1-undecorated`,
         });
       }
 
       const nested = isReactive(f) ? unobservedWrites(f, facts) : [];
       if (nested.length > 0 && f.readsInBuild.length > 0 && !f.disabledRules.includes("R1")) {
         out.push({
-          rule: "R1", kind: "nested-write-unobserved", file: facts.file, component: c, field: f,
-          line: nested[0].line, writes: nested, fingerprint: `${facts.file}#${c.name}.${f.name}#R1-nested`,
+          rule: "R1",
+          kind: "nested-write-unobserved",
+          file: facts.file,
+          component: c,
+          field: f,
+          line: nested[0].line,
+          writes: nested,
+          fingerprint: `${facts.file}#${c.name}.${f.name}#R1-nested`,
         });
       }
     }
@@ -527,8 +753,13 @@ export function candidates(facts: FileFacts): Candidate[] {
       if (r.released) continue;
       if (disabledRulesAt(facts.lines, r.acquireLine - 1).includes("R3")) continue;
       out.push({
-        rule: "R3", kind: "unreleased-resource", file: facts.file, component: c, resource: r,
-        line: r.acquireLine, fingerprint: `${facts.file}#${c.name}#R3-${r.key}`,
+        rule: "R3",
+        kind: "unreleased-resource",
+        file: facts.file,
+        component: c,
+        resource: r,
+        line: r.acquireLine,
+        fingerprint: `${facts.file}#${c.name}#R3-${r.key}`,
       });
     }
   }
