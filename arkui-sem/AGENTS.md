@@ -29,9 +29,10 @@ Semantic lint for ArkTS/ArkUI declarative state (opencode v1 plugin + CLI). See 
 
 ## Conventions
 
-- ESM TypeScript, strict, Node ≥ 22. Biome sets the format (120 columns, double quotes, semicolons): don't hand-format.
+- Follow the [Google TypeScript Style Guide](https://google.github.io/styleguide/tsguide.html); where this file differs (line width), this file wins.
+- ESM TypeScript, strict, Node ≥ 22. Biome sets the format (120 columns, single quotes, semicolons): don't hand-format.
 - No `any` and no non-null `!`: narrow the type, or model the invariant in the type (see `Candidate`).
-- Unused parameters start with `_`.
+- No `_` prefix or suffix on names (Google): drop an unused parameter, or leave out the key you don't want.
 - Match the surrounding style.
 - A rule or backend change comes with a test in `test/arkui-sem.test.mjs` that runs offline.
 - Commit messages describe the linter change only.

@@ -1,8 +1,8 @@
 // Candidates → judgments (cached) → findings/questions, and their text for agents.
-import { createHash } from "node:crypto";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, relative } from "node:path";
-import type { Questions } from "@typesafe-ai/sdk";
+import { createHash } from 'node:crypto';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { dirname, relative } from 'node:path';
+import type { Questions } from '@typesafe-ai/sdk';
 import {
   type Candidate,
   candidates,
@@ -10,18 +10,18 @@ import {
   type FileFacts,
   NaiveExtractor,
   nestedDepth,
-} from "./analysis.js";
-import { buildSlice, Q_R1, Q_R2, Q_R3, type SystemOneBackend } from "./judge.js";
+} from './analysis.js';
+import { buildSlice, Q_R1, Q_R2, Q_R3, type SystemOneBackend } from './judge.js';
 
 // --- Formatting ---
 
-const pct = (p: number | null) => (p === null ? "judge unavailable" : `p=${p.toFixed(2)}`);
+const pct = (p: number | null) => (p === null ? 'judge unavailable' : `p=${p.toFixed(2)}`);
 
 export function formatForAgent(findings: Finding[], cwd = process.cwd()): string {
-  if (findings.length === 0) return "";
+  if (findings.length === 0) return '';
   const out: string[] = [];
-  const confident = findings.filter((f) => f.band === "finding");
-  const questions = findings.filter((f) => f.band === "question");
+  const confident = findings.filter((f) => f.band === 'finding');
+  const questions = findings.filter((f) => f.band === 'question');
   out.push(`arkui-sem: ${confident.length} finding(s), ${questions.length} question(s) about ArkUI state semantics.`);
 
   for (const f of confident) {
@@ -33,24 +33,24 @@ export function formatForAgent(findings: Finding[], cwd = process.cwd()): string
     out.push(`- [${f.rule}?] ${relative(cwd, f.file)}:${f.line} ${f.subject} (${pct(f.p)}, ${f.backend})`);
     out.push(`  ${f.evidence}. Is this intended? If it should behave reactively/be released: ${f.fix}`);
     const where =
-      f.kind === "nested-write-unobserved"
+      f.kind === 'nested-write-unobserved'
         ? "above each write it lists, or above the field's decorators for all of them"
         : `above line ${f.line}`;
     out.push(
       `  If it is intentional, leave it and add \`// arkui-sem-disable-next-line ${f.rule} -- <reason>\` ${where}.`,
     );
   }
-  return out.join("\n");
+  return out.join('\n');
 }
 
 // --- Engine ---
 
-export type Band = "finding" | "question";
+export type Band = 'finding' | 'question';
 
 export interface Finding {
   fingerprint: string;
-  rule: Candidate["rule"];
-  kind: Candidate["kind"];
+  rule: Candidate['rule'];
+  kind: Candidate['kind'];
   file: string;
   line: number;
   component: string;
@@ -73,11 +73,11 @@ export interface EngineOptions {
   judgeTimeoutMs?: number;
 }
 
-const QUESTIONS: Record<Candidate["rule"], Questions> = { R1: Q_R1, R2: Q_R2, R3: Q_R3 };
-const VIOLATION_LABEL: Record<Candidate["rule"], string> = {
-  R1: "desync_bug",
-  R2: "shared_with_parent",
-  R3: "leak_bug",
+const QUESTIONS: Record<Candidate['rule'], Questions> = { R1: Q_R1, R2: Q_R2, R3: Q_R3 };
+const VIOLATION_LABEL: Record<Candidate['rule'], string> = {
+  R1: 'desync_bug',
+  R2: 'shared_with_parent',
+  R3: 'leak_bug',
 };
 // R2 label assumes the @Link → @Prop mismatch (shared intent); callers map the other intent × decorator pairs.
 
@@ -86,7 +86,7 @@ class JudgmentCache {
   constructor(private readonly path?: string) {
     if (!path) return;
     try {
-      this.entries = JSON.parse(readFileSync(path, "utf8"));
+      this.entries = JSON.parse(readFileSync(path, 'utf8'));
     } catch {
       /* empty or missing cache */
     }
@@ -114,44 +114,44 @@ function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
 /** "line 4", "lines 4 and 9", "lines 4, 7 and 9". */
 function lineList(lines: number[]): string {
   if (lines.length === 1) return `line ${lines[0]}`;
-  return `lines ${lines.slice(0, -1).join(", ")} and ${lines[lines.length - 1]}`;
+  return `lines ${lines.slice(0, -1).join(', ')} and ${lines[lines.length - 1]}`;
 }
 
 function describe(c: Candidate): { subject: string; evidence: string; fix: string } {
-  const v2 = c.component.version === "V2";
+  const v2 = c.component.version === 'V2';
   if (c.resource) {
     const r = c.resource;
     const release = r.release;
     return {
       subject: `${c.component.name} ${r.key}`,
       evidence: `${r.kind} acquired in ${r.acquireIn}() at line ${r.acquireLine}; no matching release in aboutToDisappear/onPageHide`,
-      fix: `release it in aboutToDisappear(): ${release}.${r.kind === "listener" ? " Keep the handler in a field so off() receives the same reference." : ""}`,
+      fix: `release it in aboutToDisappear(): ${release}.${r.kind === 'listener' ? ' Keep the handler in a field so off() receives the same reference.' : ''}`,
     };
   }
   const f = c.field;
   const writes = f.writes
     .slice(0, 2)
     .map((w) => `${w.context} in ${w.method}() line ${w.line}`)
-    .join("; ");
-  if (c.kind === "nested-write-unobserved") {
+    .join('; ');
+  if (c.kind === 'nested-write-unobserved') {
     const [w, ...rest] = c.writes?.length ? c.writes : f.writes;
-    const path = w?.nestedPath ?? "";
-    const type = f.type?.replace(/\[\]$/, "") ?? "<its class>";
+    const path = w?.nestedPath ?? '';
+    const type = f.type?.replace(/\[\]$/, '') ?? '<its class>';
     const first = path.match(/^\??\.(\w+)/)?.[1];
     const otherLines = [...new Set(rest.map((x) => x.line))].filter((l) => l !== w.line);
-    const also = otherLines.length ? `; also written in place at ${lineList(otherLines)}` : "";
+    const also = otherLines.length ? `; also written in place at ${lineList(otherLines)}` : '';
     const at = `${w?.context} in ${w?.method}() line ${w?.line}${also}`;
     if (v2) {
       return {
         subject: `${c.component.name}.${f.name}${path}`,
-        evidence: `${f.decorators.join(" ")} field's property written in place (${at}); V2 state only sees reassignment unless the class is @ObservedV2`,
+        evidence: `${f.decorators.join(' ')} field's property written in place (${at}); V2 state only sees reassignment unless the class is @ObservedV2`,
         fix: `mark class ${type} @ObservedV2 and the mutated properties @Trace.`,
       };
     }
     return {
       subject: `${c.component.name}.${f.name}${path}`,
-      evidence: `${f.decorators.join(" ")} field written ${nestedDepth(path)} levels deep (${at}); V1 state decorators observe only first-layer changes, and @Observed on the classes alone does not change that`,
-      fix: `change it at the first layer instead, e.g. build a new object and assign this.${f.name}${first ? `.${first}` : ""} = <new object> (or reassign this.${f.name}); or render the nested object in a child component that receives it as @ObjectLink (its class @Observed) and mutate it there.`,
+      evidence: `${f.decorators.join(' ')} field written ${nestedDepth(path)} levels deep (${at}); V1 state decorators observe only first-layer changes, and @Observed on the classes alone does not change that`,
+      fix: `change it at the first layer instead, e.g. build a new object and assign this.${f.name}${first ? `.${first}` : ''} = <new object> (or reassign this.${f.name}); or render the nested object in a child component that receives it as @ObjectLink (its class @Observed) and mutate it there.`,
     };
   }
   return {
@@ -176,7 +176,7 @@ export async function checkFiles(
   for (const file of files) {
     let facts: FileFacts;
     try {
-      facts = extractor.extract(file, readFileSync(file, "utf8"));
+      facts = extractor.extract(file, readFileSync(file, 'utf8'));
     } catch (e) {
       errors.push(`${file}: ${(e as Error).message}`);
       continue;
@@ -184,18 +184,18 @@ export async function checkFiles(
     for (const c of candidates(facts)) {
       const slice = buildSlice(facts, c, opts.taskContext);
       const questions = QUESTIONS[c.rule];
-      const key = createHash("sha256")
+      const key = createHash('sha256')
         .update(opts.backend.name)
         .update(JSON.stringify(slice))
         .update(Object.keys(questions).join())
-        .digest("hex");
+        .digest('hex');
 
       let p: number | null = cache.get(key) ?? null;
       if (p === null) {
         try {
           const { answers } = await withTimeout(opts.backend.systemOne(slice, questions), opts.judgeTimeoutMs ?? 8000);
           const verdict = answers.verdict;
-          if (verdict?.type === "choice") {
+          if (verdict?.type === 'choice') {
             p = verdict.probabilities[VIOLATION_LABEL[c.rule]] ?? null;
             if (p !== null) cache.set(key, p);
           }
@@ -206,7 +206,7 @@ export async function checkFiles(
 
       // Judge unavailable → degrade to deterministic-only and ask rather than assert.
       const band: Band | null =
-        p === null ? "question" : p >= thresholds.finding ? "finding" : p >= thresholds.question ? "question" : null;
+        p === null ? 'question' : p >= thresholds.finding ? 'finding' : p >= thresholds.question ? 'question' : null;
       if (band === null) continue;
       findings.push({
         fingerprint: c.fingerprint,

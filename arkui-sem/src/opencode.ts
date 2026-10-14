@@ -1,15 +1,15 @@
 // opencode v1 plugin. tool.execute.after: append new findings to .ets edit results.
 // session.idle: one follow-up while confident findings remain (once per finding set, ≤ 3 per session).
 // Tools: arkui_check, arkui_facts. Session state lives in memory in the long-running opencode server.
-import { readFileSync } from "node:fs";
-import { relative } from "node:path";
-import { type Plugin, tool } from "@opencode-ai/plugin";
-import { absolute, editedFiles, etsFiles, NaiveExtractor } from "./analysis.js";
-import { cachePath, loadSettings } from "./config.js";
-import { checkFiles, type Finding, formatForAgent } from "./engine.js";
-import { createBackend, type SystemOneBackend } from "./judge.js";
+import { readFileSync } from 'node:fs';
+import { relative } from 'node:path';
+import { type Plugin, tool } from '@opencode-ai/plugin';
+import { absolute, editedFiles, etsFiles, NaiveExtractor } from './analysis.js';
+import { cachePath, loadSettings } from './config.js';
+import { checkFiles, type Finding, formatForAgent } from './engine.js';
+import { createBackend, type SystemOneBackend } from './judge.js';
 
-const EDIT_TOOLS = new Set(["edit", "write", "multiedit", "patch", "apply_patch"]);
+const EDIT_TOOLS = new Set(['edit', 'write', 'multiedit', 'patch', 'apply_patch']);
 const MAX_GATE_FOLLOWUPS = 3;
 
 interface SessionState {
@@ -24,13 +24,13 @@ export const ArkuiSemPlugin: Plugin = async ({ client, directory }, options) => 
   const sessions = new Map<string, SessionState>();
   let backend: SystemOneBackend | undefined;
 
-  const log = (level: "debug" | "info" | "warn" | "error", message: string) =>
-    client.app.log({ body: { service: "arkui-sem", level, message } }).catch(() => undefined);
+  const log = (level: 'debug' | 'info' | 'warn' | 'error', message: string) =>
+    client.app.log({ body: { service: 'arkui-sem', level, message } }).catch(() => undefined);
 
   const session = (id: string): SessionState => {
     let s = sessions.get(id);
     if (!s) {
-      s = { touched: new Set(), reported: new Set(), lastGateKey: "", followups: 0 };
+      s = { touched: new Set(), reported: new Set(), lastGateKey: '', followups: 0 };
       sessions.set(id, s);
     }
     return s;
@@ -44,20 +44,20 @@ export const ArkuiSemPlugin: Plugin = async ({ client, directory }, options) => 
       cachePath: cachePath(settings),
       judgeTimeoutMs: settings.judgeTimeoutMs,
     });
-    if (errors.length) await log("warn", errors.join("; "));
+    if (errors.length) await log('warn', errors.join('; '));
     return findings;
   };
 
   await log(
-    "info",
-    `loaded (backend=${settings.backend}, gate=${settings.gate}, config=${settings.sources.join(", ") || "none"})`,
+    'info',
+    `loaded (backend=${settings.backend}, gate=${settings.gate}, config=${settings.sources.join(', ') || 'none'})`,
   );
-  for (const w of settings.warnings) await log("warn", w);
+  for (const w of settings.warnings) await log('warn', w);
 
   return {
-    "tool.execute.after": async (input, output) => {
+    'tool.execute.after': async (input, output) => {
       if (!EDIT_TOOLS.has(input.tool)) return;
-      const files = editedFiles(input.args, directory).filter((f) => f.endsWith(".ets"));
+      const files = editedFiles(input.args, directory).filter((f) => f.endsWith('.ets'));
       if (files.length === 0) return;
       try {
         const s = session(input.sessionID);
@@ -67,27 +67,27 @@ export const ArkuiSemPlugin: Plugin = async ({ client, directory }, options) => 
         if (fresh.length > 0) output.output = `${output.output}\n\n${formatForAgent(fresh, directory)}`;
       } catch (e) {
         // Never break the agent loop because the linter failed.
-        await log("error", `post-edit check failed: ${(e as Error).message}`);
+        await log('error', `post-edit check failed: ${(e as Error).message}`);
       }
     },
 
     event: async ({ event }) => {
-      if (event.type !== "session.idle" || !settings.gate) return;
+      if (event.type !== 'session.idle' || !settings.gate) return;
       const id = event.properties.sessionID;
       const s = sessions.get(id);
       if (!s || s.touched.size === 0) return;
       try {
-        const confident = (await run([...s.touched])).filter((f) => f.band === "finding");
+        const confident = (await run([...s.touched])).filter((f) => f.band === 'finding');
         const key = confident
           .map((f) => f.fingerprint)
           .sort()
-          .join("|");
+          .join('|');
         if (confident.length === 0) {
-          s.lastGateKey = "";
+          s.lastGateKey = '';
           return;
         }
         if (key === s.lastGateKey || s.followups >= MAX_GATE_FOLLOWUPS) {
-          await log("info", `${confident.length} unresolved finding(s) in session ${id}; gate already used`);
+          await log('info', `${confident.length} unresolved finding(s) in session ${id}; gate already used`);
           return;
         }
         s.followups++;
@@ -97,14 +97,14 @@ export const ArkuiSemPlugin: Plugin = async ({ client, directory }, options) => 
           body: {
             parts: [
               {
-                type: "text",
+                type: 'text',
                 text: `${formatForAgent(confident, directory)}\n\nBefore finishing: fix these, or if one is intentional, add the disable comment with a reason.`,
               },
             ],
           },
         });
       } catch (e) {
-        await log("error", `end-of-turn gate failed: ${(e as Error).message}`);
+        await log('error', `end-of-turn gate failed: ${(e as Error).message}`);
       }
     },
 
@@ -116,10 +116,10 @@ export const ArkuiSemPlugin: Plugin = async ({ client, directory }, options) => 
           paths: tool.schema
             .array(tool.schema.string())
             .optional()
-            .describe("Files or directories to check, relative to the project"),
+            .describe('Files or directories to check, relative to the project'),
         },
         async execute(args, ctx) {
-          const files = (args.paths?.length ? args.paths : ["."]).flatMap((p) => etsFiles(absolute(p, ctx.directory)));
+          const files = (args.paths?.length ? args.paths : ['.']).flatMap((p) => etsFiles(absolute(p, ctx.directory)));
           const findings = await run(files);
           return formatForAgent(findings, ctx.directory) || `arkui-sem: no findings in ${files.length} .ets file(s).`;
         },
@@ -128,10 +128,10 @@ export const ArkuiSemPlugin: Plugin = async ({ client, directory }, options) => 
       arkui_facts: tool({
         description:
           "Show ArkUI state-ownership facts for one .ets file: each component's fields with decorators, where each is read in build() and where it is written (event handler, async callback, lifecycle), and listeners/timers with their release status. Use before changing state decorators or how data flows between components.",
-        args: { file: tool.schema.string().describe("Path to a .ets file") },
+        args: { file: tool.schema.string().describe('Path to a .ets file') },
         async execute(args, ctx) {
           const file = absolute(args.file, ctx.directory);
-          const facts = new NaiveExtractor().extract(file, readFileSync(file, "utf8"));
+          const facts = new NaiveExtractor().extract(file, readFileSync(file, 'utf8'));
           return JSON.stringify(
             {
               file: relative(ctx.directory, file),

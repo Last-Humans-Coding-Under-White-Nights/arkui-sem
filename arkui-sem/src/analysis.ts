@@ -1,12 +1,12 @@
 // .ets source → program facts → rule candidates. Deterministic; no model calls.
-import { existsSync, readdirSync, statSync } from "node:fs";
-import { isAbsolute, join, resolve } from "node:path";
+import { existsSync, readdirSync, statSync } from 'node:fs';
+import { isAbsolute, join, resolve } from 'node:path';
 
 // --- Facts ---
 
-export type StateMgmtVersion = "V1" | "V2";
+export type StateMgmtVersion = 'V1' | 'V2';
 
-export type WriteContext = "build-closure" | "async-callback" | "lifecycle" | "method";
+export type WriteContext = 'build-closure' | 'async-callback' | 'lifecycle' | 'method';
 
 export interface WriteFact {
   line: number;
@@ -31,7 +31,7 @@ export interface FieldFact {
 }
 
 export interface ResourceFact {
-  kind: "listener" | "timer" | "subscription";
+  kind: 'listener' | 'timer' | 'subscription';
   /** "emitter.on:refresh", "timer:this.pollId", "Mgr.getInstance().registerFoo", … */
   key: string;
   acquireLine: number;
@@ -72,22 +72,22 @@ export interface FactExtractor {
 
 // --- Files ---
 
-const SKIP_DIRS = new Set(["node_modules", "oh_modules", "build", "dist"]);
+const SKIP_DIRS = new Set(['node_modules', 'oh_modules', 'build', 'dist']);
 
 export const absolute = (p: string, base: string) => (isAbsolute(p) ? p : resolve(base, p));
 
 export function etsFiles(path: string): string[] {
   if (!existsSync(path)) return [];
-  if (statSync(path).isFile()) return path.endsWith(".ets") ? [path] : [];
+  if (statSync(path).isFile()) return path.endsWith('.ets') ? [path] : [];
   return readdirSync(path).flatMap((name) =>
-    SKIP_DIRS.has(name) || name.startsWith(".") ? [] : etsFiles(join(path, name)),
+    SKIP_DIRS.has(name) || name.startsWith('.') ? [] : etsFiles(join(path, name)),
   );
 }
 
 export function editedFiles(args: unknown, directory: string): string[] {
   const a = (args ?? {}) as { filePath?: unknown; patchText?: unknown };
-  if (typeof a.filePath === "string") return [absolute(a.filePath, directory)];
-  if (typeof a.patchText === "string") {
+  if (typeof a.filePath === 'string') return [absolute(a.filePath, directory)];
+  if (typeof a.patchText === 'string') {
     return [...a.patchText.matchAll(/^\*\*\* (?:Add|Update) File: (.+)$|^\*\*\* Move to: (.+)$/gm)].map((m) =>
       absolute((m[1] ?? m[2]).trim(), directory),
     );
@@ -100,67 +100,67 @@ export function editedFiles(args: unknown, directory: string): string[] {
 // Text-based and single-file: no type or alias analysis. FactExtractor lets a real analyzer replace it.
 
 const LIFECYCLE = new Set([
-  "aboutToAppear",
-  "aboutToDisappear",
-  "onPageShow",
-  "onPageHide",
-  "onBackPress",
-  "aboutToReuse",
-  "aboutToRecycle",
-  "onDidBuild",
+  'aboutToAppear',
+  'aboutToDisappear',
+  'onPageShow',
+  'onPageHide',
+  'onBackPress',
+  'aboutToReuse',
+  'aboutToRecycle',
+  'onDidBuild',
 ]);
-const ACQUIRE_HOOKS = new Set(["aboutToAppear", "onPageShow", "aboutToReuse", "onDidBuild"]);
-const RELEASE_HOOKS = new Set(["aboutToDisappear", "onPageHide", "aboutToRecycle"]);
+const ACQUIRE_HOOKS = new Set(['aboutToAppear', 'onPageShow', 'aboutToReuse', 'onDidBuild']);
+const RELEASE_HOOKS = new Set(['aboutToDisappear', 'onPageHide', 'aboutToRecycle']);
 const MUTATING_CALLS = new Set([
-  "push",
-  "pop",
-  "splice",
-  "shift",
-  "unshift",
-  "sort",
-  "reverse",
-  "fill",
-  "set",
-  "delete",
-  "clear",
+  'push',
+  'pop',
+  'splice',
+  'shift',
+  'unshift',
+  'sort',
+  'reverse',
+  'fill',
+  'set',
+  'delete',
+  'clear',
 ]);
 const ASYNC_MARKERS = /\.then\(|\bawait\b|setTimeout\(|setInterval\(|\.on\(|subscribe\(/;
 
 /** Blank out comments and string contents (keeping `${…}` expressions), preserving offsets and newlines. */
 function blank(text: string): string {
-  let out = "";
-  let state: "code" | "sq" | "dq" | "tpl" | "lc" | "bc" = "code";
+  let out = '';
+  let state: 'code' | 'sq' | 'dq' | 'tpl' | 'lc' | 'bc' = 'code';
   const exprDepth: number[] = [];
   for (let i = 0; i < text.length; ) {
     const c = text[i];
     const d = text[i + 1];
     switch (state) {
-      case "code":
-        if (c === "/" && d === "/") {
-          state = "lc";
-          out += "  ";
+      case 'code':
+        if (c === '/' && d === '/') {
+          state = 'lc';
+          out += '  ';
           i += 2;
           continue;
         }
-        if (c === "/" && d === "*") {
-          state = "bc";
-          out += "  ";
+        if (c === '/' && d === '*') {
+          state = 'bc';
+          out += '  ';
           i += 2;
           continue;
         }
-        if (c === "'" || c === '"' || c === "`") {
-          state = c === "'" ? "sq" : c === '"' ? "dq" : "tpl";
+        if (c === "'" || c === '"' || c === '`') {
+          state = c === "'" ? 'sq' : c === '"' ? 'dq' : 'tpl';
           out += c;
           i++;
           continue;
         }
         if (exprDepth.length > 0) {
           const top = exprDepth.length - 1;
-          if (c === "{") exprDepth[top]++;
-          else if (c === "}") {
+          if (c === '{') exprDepth[top]++;
+          else if (c === '}') {
             if (exprDepth[top] === 0) {
               exprDepth.pop();
-              state = "tpl";
+              state = 'tpl';
               out += c;
               i++;
               continue;
@@ -171,61 +171,61 @@ function blank(text: string): string {
         out += c;
         i++;
         continue;
-      case "lc":
-        if (c === "\n") {
-          state = "code";
+      case 'lc':
+        if (c === '\n') {
+          state = 'code';
           out += c;
-        } else out += " ";
+        } else out += ' ';
         i++;
         continue;
-      case "bc":
-        if (c === "*" && d === "/") {
-          state = "code";
-          out += "  ";
+      case 'bc':
+        if (c === '*' && d === '/') {
+          state = 'code';
+          out += '  ';
           i += 2;
           continue;
         }
-        out += c === "\n" ? "\n" : " ";
+        out += c === '\n' ? '\n' : ' ';
         i++;
         continue;
-      case "sq":
-      case "dq": {
-        const quote = state === "sq" ? "'" : '"';
-        if (c === "\\") {
-          out += d === "\n" ? " \n" : "  ";
+      case 'sq':
+      case 'dq': {
+        const quote = state === 'sq' ? "'" : '"';
+        if (c === '\\') {
+          out += d === '\n' ? ' \n' : '  ';
           i += 2;
           continue;
         }
-        if (c === quote || c === "\n") {
-          state = "code";
+        if (c === quote || c === '\n') {
+          state = 'code';
           out += c;
           i++;
           continue;
         }
-        out += " ";
+        out += ' ';
         i++;
         continue;
       }
-      case "tpl":
-        if (c === "\\") {
-          out += d === "\n" ? " \n" : "  ";
+      case 'tpl':
+        if (c === '\\') {
+          out += d === '\n' ? ' \n' : '  ';
           i += 2;
           continue;
         }
-        if (c === "`") {
-          state = "code";
+        if (c === '`') {
+          state = 'code';
           out += c;
           i++;
           continue;
         }
-        if (c === "$" && d === "{") {
-          out += "${";
+        if (c === '$' && d === '{') {
+          out += '${';
           i += 2;
-          state = "code";
+          state = 'code';
           exprDepth.push(0);
           continue;
         }
-        out += c === "\n" ? "\n" : " ";
+        out += c === '\n' ? '\n' : ' ';
         i++;
         continue;
     }
@@ -270,7 +270,7 @@ function externalMethods(methods: Method[], code: string[]): Set<string> {
   };
   const roots = (f: (m: Method) => boolean) => methods.filter(f).map((m) => m.name);
   const fromBuild = reach(
-    roots((m) => m.name === "build" || m.decorators.includes("@Builder")),
+    roots((m) => m.name === 'build' || m.decorators.includes('@Builder')),
     true,
   );
   const fromLifecycle = reach(
@@ -294,17 +294,17 @@ const FIELD =
   /^\s*(?:(?:private|public|protected|static|readonly)\s+)*(\w+)\s*[?!]?\s*(?::\s*([^=;]+?))?\s*(=.*)?;?\s*$/;
 
 function decoratorsOf(s: string): string[] {
-  return (s.match(DECORATOR) ?? []).map((d) => d.replace(/\(.*$/, ""));
+  return (s.match(DECORATOR) ?? []).map((d) => d.replace(/\(.*$/, ''));
 }
 
 function disabledRulesAt(raw: string[], index: number): string[] {
-  const prev = raw[index - 1] ?? "";
+  const prev = raw[index - 1] ?? '';
   const m = prev.match(/arkui-sem-disable-next-line\s+([\w\s,]+)/);
   return m ? m[1].split(/[\s,]+/).filter((r) => /^R\d+$/.test(r)) : [];
 }
 
 export class NaiveExtractor implements FactExtractor {
-  readonly name = "naive";
+  readonly name = 'naive';
 
   extract(file: string, text: string): FileFacts {
     const raw = text.split(/\r?\n/);
@@ -314,9 +314,9 @@ export class NaiveExtractor implements FactExtractor {
     let depth = 0;
     for (const line of code) {
       depthBefore.push(depth);
-      depth += count(line, "{") - count(line, "}");
+      depth += count(line, '{') - count(line, '}');
     }
-    const depthAfter = (i: number) => depthBefore[i] + count(code[i], "{") - count(code[i], "}");
+    const depthAfter = (i: number) => depthBefore[i] + count(code[i], '{') - count(code[i], '}');
 
     const flat = blank(text);
     const observedClasses = [...flat.matchAll(/@Observed\s+(?:export\s+)?class\s+(\w+)/g)].map((m) => m[1]);
@@ -327,9 +327,9 @@ export class NaiveExtractor implements FactExtractor {
     for (let i = 0; i < code.length; i++) {
       const sm = code[i].match(/\bstruct\s+(\w+)/);
       if (!sm) continue;
-      const header = code.slice(Math.max(0, i - 4), i + 1).join(" ");
+      const header = code.slice(Math.max(0, i - 4), i + 1).join(' ');
       const decos = decoratorsOf(header);
-      if (!decos.includes("@Component") && !decos.includes("@ComponentV2")) continue;
+      if (!decos.includes('@Component') && !decos.includes('@ComponentV2')) continue;
 
       const structDepth = depthBefore[i];
       let end = i;
@@ -339,7 +339,7 @@ export class NaiveExtractor implements FactExtractor {
         this.component(
           file,
           sm[1],
-          decos.includes("@ComponentV2") ? "V2" : "V1",
+          decos.includes('@ComponentV2') ? 'V2' : 'V1',
           i,
           end,
           structDepth,
@@ -353,7 +353,7 @@ export class NaiveExtractor implements FactExtractor {
     }
     const objectLinkTypes = components.flatMap((c) =>
       c.fields.flatMap((f) =>
-        f.decorators.includes("@ObjectLink") && f.type ? [f.type.replace(/\[\]$/, "").trim()] : [],
+        f.decorators.includes('@ObjectLink') && f.type ? [f.type.replace(/\[\]$/, '').trim()] : [],
       ),
     );
     const { classFields, arrayClasses } = this.classes(code, depthBefore, depthAfter);
@@ -374,9 +374,9 @@ export class NaiveExtractor implements FactExtractor {
     code: string[],
     depthBefore: number[],
     depthAfter: (i: number) => number,
-  ): Pick<FileFacts, "classFields" | "arrayClasses"> {
-    const classFields: FileFacts["classFields"] = {};
-    const arrayClasses: FileFacts["arrayClasses"] = {};
+  ): Pick<FileFacts, 'classFields' | 'arrayClasses'> {
+    const classFields: FileFacts['classFields'] = {};
+    const arrayClasses: FileFacts['arrayClasses'] = {};
     for (let i = 0; i < code.length; i++) {
       const cm = code[i].match(/\bclass\s+(\w+)\s*(?:<([^>]*)>)?/);
       if (!cm) continue;
@@ -384,20 +384,20 @@ export class NaiveExtractor implements FactExtractor {
       if (am)
         arrayClasses[cm[1]] = {
           element: am[1].trim(),
-          params: (cm[2] ?? "")
-            .split(",")
+          params: (cm[2] ?? '')
+            .split(',')
             .map((p) => p.trim().split(/\s/)[0])
             .filter(Boolean),
         };
       const classDepth = depthBefore[i];
       const fields: Record<string, string> = {};
       classFields[cm[1]] = fields;
-      if (code[i].includes("{") && depthAfter(i) <= classDepth) continue; // body opens and closes on the header line
+      if (code[i].includes('{') && depthAfter(i) <= classDepth) continue; // body opens and closes on the header line
       let end = i;
       while (end + 1 < code.length && !(end > i && depthAfter(end) <= classDepth)) {
         end++;
         if (depthBefore[end] !== classDepth + 1) continue;
-        const fm = code[end].replace(/^\s*(?:@\w+(?:\([^)]*\))?\s*)*/, "").match(FIELD);
+        const fm = code[end].replace(/^\s*(?:@\w+(?:\([^)]*\))?\s*)*/, '').match(FIELD);
         if (fm?.[2]) fields[fm[1]] = fm[2].trim();
       }
       i = end;
@@ -408,7 +408,7 @@ export class NaiveExtractor implements FactExtractor {
   private component(
     file: string,
     name: string,
-    version: "V1" | "V2",
+    version: 'V1' | 'V2',
     start: number,
     end: number,
     structDepth: number,
@@ -425,15 +425,15 @@ export class NaiveExtractor implements FactExtractor {
     for (let i = start + 1; i < end; i++) {
       if (depthBefore[i] !== structDepth + 1) continue;
       const line = code[i];
-      if (line.trim() === "") continue;
+      if (line.trim() === '') continue;
       if (DECORATOR_ONLY.test(line)) {
         if (pending.length === 0) pendingStart = i;
         pending.push(...decoratorsOf(line));
         continue;
       }
 
-      const inline = decoratorsOf(line.match(/^\s*(?:@\w+(?:\([^)]*\))?\s*)*/)?.[0] ?? "");
-      const rest = line.replace(/^\s*(?:@\w+(?:\([^)]*\))?\s*)*/, "");
+      const inline = decoratorsOf(line.match(/^\s*(?:@\w+(?:\([^)]*\))?\s*)*/)?.[0] ?? '');
+      const rest = line.replace(/^\s*(?:@\w+(?:\([^)]*\))?\s*)*/, '');
       const decorators = [...pending, ...inline];
       // The disable comment may sit above the decorator lines or directly above the field name.
       const disabledRules = [
@@ -444,7 +444,7 @@ export class NaiveExtractor implements FactExtractor {
       const mm = rest.match(METHOD);
       if (mm && !/^\s*\w+\s*[?!]?\s*:/.test(rest)) {
         let mEnd = i;
-        while (mEnd + 1 < end && !(depthAfter(mEnd) <= structDepth + 1 && (mEnd > i || code[i].includes("}")))) mEnd++;
+        while (mEnd + 1 < end && !(depthAfter(mEnd) <= structDepth + 1 && (mEnd > i || code[i].includes('}')))) mEnd++;
         methods.push({ name: mm[1], decorators, firstLine: i, lastLine: mEnd });
         i = mEnd;
         continue;
@@ -473,14 +473,14 @@ export class NaiveExtractor implements FactExtractor {
   }
 
   private scanMethod(m: Method, raw: string[], code: string[], fields: Map<string, FieldFact>) {
-    const isBuild = m.name === "build" || m.decorators.includes("@Builder");
+    const isBuild = m.name === 'build' || m.decorators.includes('@Builder');
     for (let i = m.firstLine; i <= m.lastLine; i++) {
       const line = code[i];
       for (const hit of line.matchAll(/this\.(\w+)/g)) {
         const field = fields.get(hit[1]);
         if (!field) continue;
         const after = line.slice((hit.index ?? 0) + hit[0].length);
-        const chain = after.match(/^((?:\??\.\w+|\[[^\]]*\])*)/)?.[1] ?? "";
+        const chain = after.match(/^((?:\??\.\w+|\[[^\]]*\])*)/)?.[1] ?? '';
         const tail = after.slice(chain.length);
         const before = line.slice(0, hit.index ?? 0);
 
@@ -492,16 +492,16 @@ export class NaiveExtractor implements FactExtractor {
           if (isBuild && !field.readsInBuild.includes(i + 1)) field.readsInBuild.push(i + 1);
           continue;
         }
-        const nested = mutatingCall ? `${chain.replace(/\.\w+$/, "")}[]` : chain;
-        const window = code.slice(Math.max(m.firstLine, i - 3), i + 1).join("\n");
+        const nested = mutatingCall ? `${chain.replace(/\.\w+$/, '')}[]` : chain;
+        const window = code.slice(Math.max(m.firstLine, i - 3), i + 1).join('\n');
         const isAsync = ASYNC_MARKERS.test(window);
         const context: WriteContext = isAsync
-          ? "async-callback"
+          ? 'async-callback'
           : isBuild
-            ? "build-closure"
+            ? 'build-closure'
             : LIFECYCLE.has(m.name)
-              ? "lifecycle"
-              : "method";
+              ? 'lifecycle'
+              : 'method';
         field.writes.push({
           line: i + 1,
           context,
@@ -514,7 +514,7 @@ export class NaiveExtractor implements FactExtractor {
   }
 
   private resources(methods: Method[], raw: string[]): ResourceFact[] {
-    const body = (m: Method) => raw.slice(m.firstLine, m.lastLine + 1).join("\n");
+    const body = (m: Method) => raw.slice(m.firstLine, m.lastLine + 1).join('\n');
     // A lifecycle hook plus the same-component helpers it calls directly (one level), e.g. aboutToDisappear → this.unregisterAll().
     const scope = (hooks: Set<string>) =>
       methods
@@ -528,8 +528,8 @@ export class NaiveExtractor implements FactExtractor {
         ]);
     const released = scope(RELEASE_HOOKS)
       .map((s) => body(s.m))
-      .join("\n");
-    const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      .join('\n');
+    const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const out: ResourceFact[] = [];
     const seen = new Set<string>();
     const add = (r: ResourceFact) => {
@@ -545,10 +545,10 @@ export class NaiveExtractor implements FactExtractor {
         // Event listeners: target.on('event' | CONST.EVENT, handler) ↔ target.off(same event).
         for (const on of line.matchAll(/([\w$.]+(?:\(\))?)\.on\(\s*((['"])[^'"]+\3|[\w$.]+)\s*[,)]/g)) {
           const [, target, event] = on;
-          const name = event.replace(/^['"]|['"]$/g, "");
+          const name = event.replace(/^['"]|['"]$/g, '');
           const off = new RegExp(`\\.off\\(\\s*(['"]${esc(name)}['"]|${esc(name)})\\s*[,)]`);
           add({
-            kind: "listener",
+            kind: 'listener',
             key: `${target}.on:${name}`,
             acquireLine: i + 1,
             acquireIn: via,
@@ -561,10 +561,10 @@ export class NaiveExtractor implements FactExtractor {
           /([\w$.]+(?:\(\))?)\.(register\w*|subscribe\w*|add\w*(?:Listener|Observer|Callback))\(/g,
         )) {
           const [, target, method] = reg;
-          const undo = method.startsWith("add") ? `remove${method.slice(3)}` : `un${method}`;
-          const releasedHere = new RegExp(`\\b${esc(undo)}\\s*\\(`, "i").test(released);
+          const undo = method.startsWith('add') ? `remove${method.slice(3)}` : `un${method}`;
+          const releasedHere = new RegExp(`\\b${esc(undo)}\\s*\\(`, 'i').test(released);
           add({
-            kind: "subscription",
+            kind: 'subscription',
             key: `${target}.${method}`,
             acquireLine: i + 1,
             acquireIn: via,
@@ -575,7 +575,7 @@ export class NaiveExtractor implements FactExtractor {
         const timer = line.match(/(this\.\w+)\s*=\s*setInterval\(/);
         if (timer) {
           add({
-            kind: "timer",
+            kind: 'timer',
             key: `timer:${timer[1]}`,
             acquireLine: i + 1,
             acquireIn: via,
@@ -584,12 +584,12 @@ export class NaiveExtractor implements FactExtractor {
           });
         } else if (/\bsetInterval\(/.test(line)) {
           add({
-            kind: "timer",
+            kind: 'timer',
             key: `timer:anonymous@${i + 1}`,
             acquireLine: i + 1,
             acquireIn: via,
             released: false,
-            release: "clearInterval(<the interval id>)",
+            release: 'clearInterval(<the interval id>)',
           });
         }
       }
@@ -600,13 +600,13 @@ export class NaiveExtractor implements FactExtractor {
 
 // --- Rules ---
 
-export type RuleId = "R1" | "R2" | "R3";
+export type RuleId = 'R1' | 'R2' | 'R3';
 
 export type CandidateKind =
-  | "undecorated-mutated-rendered" // R1: plain member written after init and read in build()
-  | "nested-write-unobserved" // R1: in-place write deeper than the state decorator observes
-  | "ownership-intent" // R2: passed-in field; candidates() does not emit it (callers build it)
-  | "unreleased-resource"; // R3: acquired in a lifecycle hook, no matching release
+  | 'undecorated-mutated-rendered' // R1: plain member written after init and read in build()
+  | 'nested-write-unobserved' // R1: in-place write deeper than the state decorator observes
+  | 'ownership-intent' // R2: passed-in field; candidates() does not emit it (callers build it)
+  | 'unreleased-resource'; // R3: acquired in a lifecycle hook, no matching release
 
 /** A field candidate (R1, R2) or a resource candidate (R3). */
 export type Candidate = CandidateBase &
@@ -625,27 +625,27 @@ interface CandidateBase {
 }
 
 const REACTIVE_V1 = new Set([
-  "@State",
-  "@Prop",
-  "@Link",
-  "@ObjectLink",
-  "@Provide",
-  "@Consume",
-  "@StorageLink",
-  "@StorageProp",
-  "@LocalStorageLink",
-  "@LocalStorageProp",
+  '@State',
+  '@Prop',
+  '@Link',
+  '@ObjectLink',
+  '@Provide',
+  '@Consume',
+  '@StorageLink',
+  '@StorageProp',
+  '@LocalStorageLink',
+  '@LocalStorageProp',
 ]);
-const REACTIVE_V2 = new Set(["@Local", "@Param", "@Provider", "@Consumer"]);
+const REACTIVE_V2 = new Set(['@Local', '@Param', '@Provider', '@Consumer']);
 // Fields that never hold renderable state.
-const NON_STATE = new Set(["@BuilderParam", "@Event", "@Require"]);
+const NON_STATE = new Set(['@BuilderParam', '@Event', '@Require']);
 
 const isReactive = (f: FieldFact) => f.decorators.some((d) => REACTIVE_V1.has(d) || REACTIVE_V2.has(d));
 const isReactiveV1 = (f: FieldFact) => f.decorators.some((d) => REACTIVE_V1.has(d));
 const baseType = (t?: string) =>
   t
-    ?.replace(/\[\]$/, "")
-    .replace(/\s*\|\s*(undefined|null)$/, "")
+    ?.replace(/\[\]$/, '')
+    .replace(/\s*\|\s*(undefined|null)$/, '')
     .trim();
 
 const segments = (path?: string) => path?.match(/\??\.\w+|\[[^\]]*\]/g) ?? [];
@@ -653,8 +653,8 @@ const segments = (path?: string) => path?.match(/\??\.\w+|\[[^\]]*\]/g) ?? [];
 /** Levels below the field a write reaches: ".title" → 1, ".address.city" → 2, "[i].title" → 2, "[]" (array call) → 1. */
 export const nestedDepth = (path?: string) => segments(path).length;
 
-const nonNull = (t: string) => t.replace(/\s*\|\s*(?:undefined|null)\b/g, "").trim();
-const className = (t: string) => nonNull(t).replace(/<.*>$/, "").trim();
+const nonNull = (t: string) => t.replace(/\s*\|\s*(?:undefined|null)\b/g, '').trim();
+const className = (t: string) => nonNull(t).replace(/<.*>$/, '').trim();
 const own = <T>(map: Record<string, T>, key: string): T | undefined => (Object.hasOwn(map, key) ? map[key] : undefined);
 
 /** Element type of X[], Array<X>, or a file class extending Array<…> (its type parameters bound from t's arguments). */
@@ -666,7 +666,7 @@ function elementType(t: string, facts: FileFacts): string | undefined {
   const args =
     t
       .match(/<(.+)>$/)?.[1]
-      .split(",")
+      .split(',')
       .map((a) => a.trim()) ?? [];
   const param = cls.params.indexOf(cls.element);
   return param < 0 ? cls.element : args[param];
@@ -688,12 +688,12 @@ function typeAt(fieldType: string | undefined, segs: string[], facts: FileFacts)
 /** Whether build() or a @Builder reads this.<field><path> or deeper; any index matches any index, with or without ?. before
  *  it. For an array call ("…[]") only reads of the contents count, so passing the array itself to a child does not. */
 function rendersPath(f: FieldFact, path: string, facts: FileFacts): boolean {
-  const arrayCall = path.endsWith("[]");
+  const arrayCall = path.endsWith('[]');
   const tail = segments(arrayCall ? path.slice(0, -2) : path)
-    .map((s) => (s.startsWith("[") ? "(?:\\?\\.)?\\[[^\\]]*\\]" : `\\??\\.${s.replace(/^\??\./, "")}`))
-    .join("");
-  const read = new RegExp(`\\bthis\\.${f.name}${tail}${arrayCall ? "(?:(?:\\?\\.)?\\[|\\??\\.\\w)" : "(?!\\w)"}`);
-  return f.readsInBuild.some((l) => read.test(facts.lines[l - 1] ?? ""));
+    .map((s) => (s.startsWith('[') ? '(?:\\?\\.)?\\[[^\\]]*\\]' : `\\??\\.${s.replace(/^\??\./, '')}`))
+    .join('');
+  const read = new RegExp(`\\bthis\\.${f.name}${tail}${arrayCall ? '(?:(?:\\?\\.)?\\[|\\??\\.\\w)' : '(?!\\w)'}`);
+  return f.readsInBuild.some((l) => read.test(facts.lines[l - 1] ?? ''));
 }
 
 /** V1: a property change on an @Observed object reaches every @ObjectLink bound to that object (OpenHarmony @Observed/@ObjectLink
@@ -713,14 +713,14 @@ function seenByObjectLink(f: FieldFact, nestedPath: string, facts: FileFacts): b
 /** Writes the decorator can't see, minus writes under a disable comment. V1: deeper than the first layer, even with @Observed
  *  classes, unless an @ObjectLink child sees them. V2: any property write unless the class is @ObservedV2. */
 function unobservedWrites(f: FieldFact, facts: FileFacts) {
-  const writes = f.writes.filter((w) => !w.disabledRules.includes("R1"));
+  const writes = f.writes.filter((w) => !w.disabledRules.includes('R1'));
   if (isReactiveV1(f))
     return writes.filter(
       (w) => w.nestedPath !== undefined && nestedDepth(w.nestedPath) >= 2 && !seenByObjectLink(f, w.nestedPath, facts),
     );
   const type = baseType(f.type);
   if (type !== undefined && facts.observedV2Classes.includes(type)) return [];
-  return writes.filter((w) => w.nestedPath && w.nestedPath !== "[]");
+  return writes.filter((w) => w.nestedPath && w.nestedPath !== '[]');
 }
 
 export function candidates(facts: FileFacts): Candidate[] {
@@ -729,10 +729,10 @@ export function candidates(facts: FileFacts): Candidate[] {
     for (const f of c.fields) {
       if (f.decorators.some((d) => NON_STATE.has(d))) continue;
 
-      if (!isReactive(f) && f.readsInBuild.length > 0 && f.writes.length > 0 && !f.disabledRules.includes("R1")) {
+      if (!isReactive(f) && f.readsInBuild.length > 0 && f.writes.length > 0 && !f.disabledRules.includes('R1')) {
         out.push({
-          rule: "R1",
-          kind: "undecorated-mutated-rendered",
+          rule: 'R1',
+          kind: 'undecorated-mutated-rendered',
           file: facts.file,
           component: c,
           field: f,
@@ -742,10 +742,10 @@ export function candidates(facts: FileFacts): Candidate[] {
       }
 
       const nested = isReactive(f) ? unobservedWrites(f, facts) : [];
-      if (nested.length > 0 && f.readsInBuild.length > 0 && !f.disabledRules.includes("R1")) {
+      if (nested.length > 0 && f.readsInBuild.length > 0 && !f.disabledRules.includes('R1')) {
         out.push({
-          rule: "R1",
-          kind: "nested-write-unobserved",
+          rule: 'R1',
+          kind: 'nested-write-unobserved',
           file: facts.file,
           component: c,
           field: f,
@@ -757,10 +757,10 @@ export function candidates(facts: FileFacts): Candidate[] {
     }
     for (const r of c.resources) {
       if (r.released) continue;
-      if (disabledRulesAt(facts.lines, r.acquireLine - 1).includes("R3")) continue;
+      if (disabledRulesAt(facts.lines, r.acquireLine - 1).includes('R3')) continue;
       out.push({
-        rule: "R3",
-        kind: "unreleased-resource",
+        rule: 'R3',
+        kind: 'unreleased-resource',
         file: facts.file,
         component: c,
         resource: r,

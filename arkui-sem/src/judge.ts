@@ -11,9 +11,9 @@ import {
   type ScoreResponse,
   score,
   TypeSafeClient,
-} from "@typesafe-ai/sdk";
-import { type Candidate, type FileFacts, nestedDepth } from "./analysis.js";
-import type { Credentials } from "./config.js";
+} from '@typesafe-ai/sdk';
+import { type Candidate, type FileFacts, nestedDepth } from './analysis.js';
+import type { Credentials } from './config.js';
 
 // --- System One interface, Jev, Clef ---
 
@@ -37,12 +37,12 @@ export class JevBackend implements SystemOneBackend {
   /** Without apiKey the SDK reads TYPESAFE_API_KEY; model defaults to jev-latest. Laya is a local server with the same API. */
   constructor(
     apiKey?: string,
-    readonly name = "jev",
+    readonly name = 'jev',
     local?: { baseURL: string; model: string },
   ) {
     this.client = new TypeSafeClient(
       local
-        ? { apiKey: apiKey ?? "local", baseURL: local.baseURL, defaultModel: local.model }
+        ? { apiKey: apiKey ?? 'local', baseURL: local.baseURL, defaultModel: local.model }
         : apiKey
           ? { apiKey }
           : undefined,
@@ -64,16 +64,20 @@ export class JevBackend implements SystemOneBackend {
   }
 }
 
+function without(obj: Record<string, JsonValue>, key: string): Record<string, JsonValue> {
+  return Object.fromEntries(Object.entries(obj).filter(([k]) => k !== key));
+}
+
 /** Progressively smaller copies of a slice: no task context, then no spec card, then fewer excerpts. */
 function shrink(state: EntryType): EntryType[] {
-  if (typeof state !== "object" || state === null || Array.isArray(state)) return [];
-  const { task_context: _t, ...noTask } = state as { [key: string]: JsonValue };
-  const { spec_card: _s, ...noCard } = noTask;
+  if (typeof state !== 'object' || state === null || Array.isArray(state)) return [];
+  const noTask = without(state as Record<string, JsonValue>, 'task_context');
+  const noCard = without(noTask, 'spec_card');
   const ex = Array.isArray(noCard.excerpts) ? noCard.excerpts : [];
   return [noTask, noCard, { ...noCard, excerpts: ex.slice(0, 3) }, { ...noCard, excerpts: ex.slice(0, 1) }];
 }
 
-type ClefModel = "@cf/cloudflare/clef" | "@cf/cloudflare/clef-flash";
+type ClefModel = '@cf/cloudflare/clef' | '@cf/cloudflare/clef-flash';
 
 interface WorkersAIEnvelope {
   success: boolean;
@@ -86,7 +90,7 @@ export class ClefBackend implements SystemOneBackend {
   private readonly apiToken?: string;
 
   constructor(
-    readonly name: ClefModel = "@cf/cloudflare/clef-flash",
+    readonly name: ClefModel = '@cf/cloudflare/clef-flash',
     creds: { accountId?: string; apiToken?: string } = {},
   ) {
     this.accountId = creds.accountId ?? process.env.CLOUDFLARE_ACCOUNT_ID;
@@ -94,14 +98,14 @@ export class ClefBackend implements SystemOneBackend {
   }
 
   async systemOne(state: EntryType, questions: Questions): Promise<Result> {
-    if (!this.accountId || !this.apiToken) throw new Error("Cloudflare accountId/apiToken are not configured");
+    if (!this.accountId || !this.apiToken) throw new Error('Cloudflare accountId/apiToken are not configured');
     const url = `https://api.cloudflare.com/client/v4/accounts/${this.accountId}/ai/run/${this.name}`;
     const t0 = performance.now();
     const res = await fetch(url, {
-      method: "POST",
+      method: 'POST',
       headers: {
         Authorization: `Bearer ${this.apiToken}`,
-        "Content-Type": "application/json",
+        'Content-Type': 'application/json',
       },
       body: JSON.stringify({ state, questions }),
     });
@@ -117,22 +121,22 @@ export class OpenRouterClefBackend implements SystemOneBackend {
   private readonly baseURL: string;
 
   constructor(
-    readonly name: "cloudflare/clef" | "cloudflare/clef-flash" = "cloudflare/clef-flash",
+    readonly name: 'cloudflare/clef' | 'cloudflare/clef-flash' = 'cloudflare/clef-flash',
     creds: { apiKey?: string; baseUrl?: string } = {},
   ) {
     this.apiKey = creds.apiKey ?? process.env.OPENROUTER_API_KEY;
-    this.baseURL = (creds.baseUrl ?? process.env.OPENROUTER_BASE_URL ?? "https://openrouter.ai/api/alpha").replace(
+    this.baseURL = (creds.baseUrl ?? process.env.OPENROUTER_BASE_URL ?? 'https://openrouter.ai/api/alpha').replace(
       /\/+$/,
-      "",
+      '',
     );
   }
 
   async systemOne(state: EntryType, questions: Questions): Promise<Result> {
-    if (!this.apiKey) throw new Error("OpenRouter apiKey is not configured");
+    if (!this.apiKey) throw new Error('OpenRouter apiKey is not configured');
     const t0 = performance.now();
     const res = await fetch(`${this.baseURL}/decisions`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${this.apiKey}`, "Content-Type": "application/json", "X-Title": "arkui-sem" },
+      method: 'POST',
+      headers: { Authorization: `Bearer ${this.apiKey}`, 'Content-Type': 'application/json', 'X-Title': 'arkui-sem' },
       body: JSON.stringify({ model: this.name, state, questions }),
     });
     const raw = await res.text();
@@ -145,7 +149,7 @@ export class OpenRouterClefBackend implements SystemOneBackend {
     const answers = body.answers ?? body.result?.answers;
     if (!res.ok || !answers)
       throw new Error(
-        `${this.name}: HTTP ${res.status} ${(body.error ? JSON.stringify(body.error) : raw).slice(0, 300).replaceAll(this.apiKey, "***")}`,
+        `${this.name}: HTTP ${res.status} ${(body.error ? JSON.stringify(body.error) : raw).slice(0, 300).replaceAll(this.apiKey, '***')}`,
       );
     return { backend: this.name, answers, latencyMs: performance.now() - t0 };
   }
@@ -159,25 +163,25 @@ export const MAX_CHOICE_OPTIONS = 255;
 export const MAX_SCORE_LEVELS = 10;
 
 export const text = (e: EntryType | undefined): string =>
-  e == null ? "" : typeof e === "string" ? e : JSON.stringify(e);
+  e == null ? '' : typeof e === 'string' ? e : JSON.stringify(e);
 
 /** Allowed answers per question: noul → "true"/"false"; choice → its labels; score → levels "0".."n-1". */
 export function labelsOf(q: Question): string[] {
-  if (q.type === "noul") return ["true", "false"];
-  if (q.type === "choice") return Object.keys(q.criteria);
+  if (q.type === 'noul') return ['true', 'false'];
+  if (q.type === 'choice') return Object.keys(q.criteria);
   return q.criteria.map((_, i) => String(i));
 }
 
 /** Same limits as the System One API: 2–255 choices, 2–10 score levels. */
 export function validateQuestions(questions: Questions): void {
   const entries = Object.entries(questions);
-  if (entries.length === 0) throw new Error("questions must be non-empty");
+  if (entries.length === 0) throw new Error('questions must be non-empty');
   for (const [id, q] of entries) {
-    if (q.type === "choice") {
+    if (q.type === 'choice') {
       const n = Object.keys(q.criteria).length;
       if (n < 2 || n > MAX_CHOICE_OPTIONS)
         throw new Error(`${id}: a choice needs 2–${MAX_CHOICE_OPTIONS} options, got ${n}`);
-    } else if (q.type === "score") {
+    } else if (q.type === 'score') {
       const n = q.criteria.length;
       if (n < 2 || n > MAX_SCORE_LEVELS) throw new Error(`${id}: a score needs 2–${MAX_SCORE_LEVELS} levels, got ${n}`);
     }
@@ -187,19 +191,19 @@ export function validateQuestions(questions: Questions): void {
 export function describeQuestion(id: string, q: Question): string {
   const keys = labelsOf(q);
   const head = `${id} [${q.type}]: ${text(q.instructions)}`;
-  if (q.type === "noul") {
+  if (q.type === 'noul') {
     const c = q.criteria ?? {};
-    return `${head}\n  ${keys[0]}: yes${c.true == null ? "" : ` (${text(c.true)})`}\n  ${keys[1]}: no${c.false == null ? "" : ` (${text(c.false)})`}`;
+    return `${head}\n  ${keys[0]}: yes${c.true == null ? '' : ` (${text(c.true)})`}\n  ${keys[1]}: no${c.false == null ? '' : ` (${text(c.false)})`}`;
   }
   const options: [string, EntryType][] =
-    q.type === "choice" ? Object.entries(q.criteria) : q.criteria.map((d, i) => [String(i), d]);
+    q.type === 'choice' ? Object.entries(q.criteria) : q.criteria.map((d, i) => [String(i), d]);
   return [
     head,
     ...options.map(
       ([label, d], i) =>
-        `  ${keys[i]}: ${q.type === "choice" ? label : `level ${label}`}${d == null ? "" : ` (${text(d)})`}`,
+        `  ${keys[i]}: ${q.type === 'choice' ? label : `level ${label}`}${d == null ? '' : ` (${text(d)})`}`,
     ),
-  ].join("\n");
+  ].join('\n');
 }
 
 export function normalize(dist: Record<string, number>, labels: string[]): Record<string, number> {
@@ -215,57 +219,57 @@ export function normalize(dist: Record<string, number>, labels: string[]): Recor
 export function toAnswer(q: Question, dist: Record<string, number>): Answer {
   const labels = labelsOf(q);
   const p = normalize(dist, labels);
-  if (q.type === "noul") return { type: "noul", noul: p.true };
+  if (q.type === 'noul') return { type: 'noul', noul: p.true };
   const [best, confidence] = Object.entries(p).reduce((a, b) => (b[1] > a[1] ? b : a));
-  if (q.type === "choice") return { type: "choice", choice: best, confidence, probabilities: p };
+  if (q.type === 'choice') return { type: 'choice', choice: best, confidence, probabilities: p };
   const legend = Object.fromEntries(q.criteria.map((d, i) => [String(i), d]));
   const score = Object.entries(p).reduce((s, [level, v]) => s + Number(level) * v, 0);
-  return { type: "score", score, confidence, legend, probabilities: p } as ScoreResponse;
+  return { type: 'score', score, confidence, legend, probabilities: p } as ScoreResponse;
 }
 
 // --- Questions ---
 
 /** R1: under-reactive state. */
 export const Q_R1 = {
-  is_ui_state: noul("The value is shown to the user and is expected to change while this screen is visible."),
+  is_ui_state: noul('The value is shown to the user and is expected to change while this screen is visible.'),
   intended_static: noul(
-    "The value is configuration, a cache, a debug label, or bookkeeping that is not meant to change what users see.",
+    'The value is configuration, a cache, a debug label, or bookkeeping that is not meant to change what users see.',
   ),
-  user_expects: noul("A user performing the triggering action would expect the displayed output to change."),
+  user_expects: noul('A user performing the triggering action would expect the displayed output to change.'),
   verdict: choice("Classify the relationship between this value's mutations and the rendered UI.", {
-    desync_bug: "The UI is meant to reflect the mutation but will not re-render.",
-    intentionally_non_reactive: "The value is deliberately not reactive.",
-    not_user_visible: "The value does not affect anything the user sees.",
-    insufficient_context: "The state does not contain enough information to decide.",
+    desync_bug: 'The UI is meant to reflect the mutation but will not re-render.',
+    intentionally_non_reactive: 'The value is deliberately not reactive.',
+    not_user_visible: 'The value does not affect anything the user sees.',
+    insufficient_context: 'The state does not contain enough information to decide.',
   }),
-  severity: score("How severe is the user-visible effect if this is a bug?", [
-    "Cosmetic",
-    "Minor: stale but harmless",
-    "Broken feature",
-    "Data loss or crash",
+  severity: score('How severe is the user-visible effect if this is a bug?', [
+    'Cosmetic',
+    'Minor: stale but harmless',
+    'Broken feature',
+    'Data loss or crash',
   ]),
 } satisfies Questions;
 
 /** R3: acquired resource with no release in teardown. */
 export const Q_R3 = {
-  app_lifetime: noul("The resource is intended to live for the whole application, not just this component."),
+  app_lifetime: noul('The resource is intended to live for the whole application, not just this component.'),
   released_elsewhere: noul(
-    "The resource is plausibly released somewhere outside this component (an owner object or service).",
+    'The resource is plausibly released somewhere outside this component (an owner object or service).',
   ),
   verdict: choice("Classify this acquired resource with no release in the component's teardown hooks.", {
-    leak_bug: "It should be released when the component disappears; leaving it causes leaks or duplicate callbacks.",
-    intentionally_persistent: "It is deliberately kept alive beyond this component.",
-    released_elsewhere: "Another owner releases it.",
-    insufficient_context: "The state does not contain enough information to decide.",
+    leak_bug: 'It should be released when the component disappears; leaving it causes leaks or duplicate callbacks.',
+    intentionally_persistent: 'It is deliberately kept alive beyond this component.',
+    released_elsewhere: 'Another owner releases it.',
+    insufficient_context: 'The state does not contain enough information to decide.',
   }),
 } satisfies Questions;
 
 /** R2: ownership intent; the rules map it to V1/V2 decorators. */
 export const Q_R2 = {
   ownership: choice("Which ownership does the child component's use of this value intend?", {
-    child_local_copy: "The child edits its own draft; the parent does not need to see edits.",
+    child_local_copy: 'The child edits its own draft; the parent does not need to see edits.',
     shared_with_parent: "The parent must see the child's edits.",
-    parent_display_only: "The child should only display the value and should not mutate it.",
+    parent_display_only: 'The child should only display the value and should not mutate it.',
   }),
 } satisfies Questions;
 
@@ -274,35 +278,35 @@ export const Q_R2 = {
 // Facts first, short excerpts second; the spec card is injected because the model isn't trusted to know ArkUI.
 
 export const SPEC_CARDS: Record<string, string> = {
-  "R1:V1":
-    "ArkUI state management V1: only decorated state re-renders the UI. @State = local reactive state; @Prop = one-way copy from the parent (local edits are overwritten when the parent updates); @Link = two-way binding with parent state. Undecorated struct members never trigger re-render. @State observes reassignment and first-level property changes only; in-place changes two or more levels deep (this.a.b.c = ...) never re-render this component, even when the classes are @Observed; that needs the nested object rendered through @ObjectLink in a child component, or a first-layer reassignment.",
-  "R1:V2":
-    "ArkUI state management V2 (@ComponentV2): @Local = local reactive state; @Param = read-only input from the parent (changes flow back through an @Event callback); undecorated members never trigger re-render. Deep observation of class properties requires @ObservedV2 on the class and @Trace on each observed property.",
-  "R3:V1":
-    "ArkUI component lifecycle: aboutToAppear runs before the first build, aboutToDisappear before the component is destroyed. Listeners, subscriptions and timers registered in aboutToAppear are normally released in aboutToDisappear (off(...), unregisterX(...), unsubscribe(...), clearInterval(...)); otherwise callbacks keep firing and leak after the component is gone.",
+  'R1:V1':
+    'ArkUI state management V1: only decorated state re-renders the UI. @State = local reactive state; @Prop = one-way copy from the parent (local edits are overwritten when the parent updates); @Link = two-way binding with parent state. Undecorated struct members never trigger re-render. @State observes reassignment and first-level property changes only; in-place changes two or more levels deep (this.a.b.c = ...) never re-render this component, even when the classes are @Observed; that needs the nested object rendered through @ObjectLink in a child component, or a first-layer reassignment.',
+  'R1:V2':
+    'ArkUI state management V2 (@ComponentV2): @Local = local reactive state; @Param = read-only input from the parent (changes flow back through an @Event callback); undecorated members never trigger re-render. Deep observation of class properties requires @ObservedV2 on the class and @Trace on each observed property.',
+  'R3:V1':
+    'ArkUI component lifecycle: aboutToAppear runs before the first build, aboutToDisappear before the component is destroyed. Listeners, subscriptions and timers registered in aboutToAppear are normally released in aboutToDisappear (off(...), unregisterX(...), unsubscribe(...), clearInterval(...)); otherwise callbacks keep firing and leak after the component is gone.',
 };
-SPEC_CARDS["R3:V2"] = SPEC_CARDS["R3:V1"];
+SPEC_CARDS['R3:V2'] = SPEC_CARDS['R3:V1'];
 // R2 cards explain the intents without naming decorators, so the card can't leak the answer.
-SPEC_CARDS["R2:V1"] =
+SPEC_CARDS['R2:V1'] =
   "ArkUI components receive values from their parent when the parent constructs them in its build(). A passed-in field can be used three ways: shared_with_parent = the child's writes must reach the parent's variable (two-way: the parent and its other children see the change); child_local_copy = the child starts from the parent's value and edits its own draft, and the parent never sees those edits (a later parent update overwrites the draft); parent_display_only = the child only reads and renders the value, the parent alone changes it. Judge from what the child does with the value: whether and where it writes it (event handlers, async callbacks, lifecycle), whether the edit is meant to be visible outside the child, and the field's name and type.";
-SPEC_CARDS["R2:V2"] =
+SPEC_CARDS['R2:V2'] =
   "ArkUI V2 components (@ComponentV2) receive values from their parent when the parent constructs them in its build(). A passed-in field can be used three ways: shared_with_parent = the child's changes must reach the parent's variable (either written through a shared ancestor-provided value or sent back through a callback the parent passed in); child_local_copy = the child starts from the parent's value and edits its own draft, which the parent never sees; parent_display_only = the child only reads and renders the value. Judge from what the child does with the value, which callbacks it invokes, and the field's name and type.";
 
 const MAX_EXCERPTS = 6;
 
 function excerpt(facts: FileFacts, line: number): string {
-  const text = facts.lines[line - 1]?.trim() ?? "";
+  const text = facts.lines[line - 1]?.trim() ?? '';
   return `${line}: ${text.length > 160 ? `${text.slice(0, 157)}...` : text}`;
 }
 
 /** Function-typed fields of the component that it invokes as this.name(...): the callbacks the child calls back on. */
 function invokedCallbacks(facts: FileFacts, c: Candidate): string[] {
-  const text = facts.lines.join("\n");
+  const text = facts.lines.join('\n');
   return c.component.fields
     .filter(
       (f) =>
         f.name !== c.field?.name &&
-        /=>/.test(f.type ?? "") &&
+        /=>/.test(f.type ?? '') &&
         new RegExp(`this\\.${f.name}\\s*(\\?\\.)?\\(`).test(text),
     )
     .map((f) => `${f.name}: ${f.type}`)
@@ -325,8 +329,8 @@ export function buildSlice(
     lines.add(f.line);
     for (const l of f.readsInBuild.slice(0, 2)) lines.add(l);
     for (const w of f.writes.slice(0, 3)) lines.add(w.line);
-    const typeName = f.type?.replace(/\[\]$/, "").trim();
-    if (c.rule === "R2") {
+    const typeName = f.type?.replace(/\[\]$/, '').trim();
+    if (c.rule === 'R2') {
       // No decorators: R2 asks for the intent the decorator should express.
       candidate = {
         kind: c.kind,
@@ -378,7 +382,7 @@ export function buildSlice(
 
   return {
     rule: c.rule,
-    framework: { name: "ArkUI", state_mgmt: comp.version },
+    framework: { name: 'ArkUI', state_mgmt: comp.version },
     spec_card: SPEC_CARDS[`${c.rule}:${comp.version}`] ?? null,
     component: comp.name,
     candidate,
@@ -397,7 +401,7 @@ export function buildSlice(
 
 function choiceAnswer(probabilities: Record<string, number>): Answer {
   const [choice, confidence] = Object.entries(probabilities).reduce((a, b) => (b[1] > a[1] ? b : a));
-  return { type: "choice", choice, confidence, probabilities };
+  return { type: 'choice', choice, confidence, probabilities };
 }
 
 /** The slice fields the heuristic reads (see buildSlice); the state arrives as untyped JSON, so any may be missing. */
@@ -413,18 +417,18 @@ interface WriteSlice {
   nested_depth?: number;
 }
 
-const strings = (v: unknown): string[] => (Array.isArray(v) ? v.filter((e) => typeof e === "string") : []);
+const strings = (v: unknown): string[] => (Array.isArray(v) ? v.filter((e) => typeof e === 'string') : []);
 
 export class HeuristicBackend implements SystemOneBackend {
-  readonly name = "heuristic";
+  readonly name = 'heuristic';
 
   async systemOne(state: EntryType, questions: Questions): Promise<Result> {
-    const s: HeuristicSlice = typeof state === "object" && state !== null && !Array.isArray(state) ? state : {};
+    const s: HeuristicSlice = typeof state === 'object' && state !== null && !Array.isArray(state) ? state : {};
     const cand = s.candidate ?? {};
     const answers: Record<string, Answer> = {};
 
-    if (s.rule === "R1") {
-      const type = typeof cand.type === "string" ? cand.type : "";
+    if (s.rule === 'R1') {
+      const type = typeof cand.type === 'string' ? cand.type : '';
       const writes: WriteSlice[] = Array.isArray(cand.writes) ? cand.writes : [];
       const excerpts = strings(s.excerpts);
 
@@ -434,9 +438,9 @@ export class HeuristicBackend implements SystemOneBackend {
       } else {
         const contexts = writes.map((w) => w.context);
 
-        const onlyLifecycle = contexts.length > 0 && contexts.every((c) => c === "lifecycle");
+        const onlyLifecycle = contexts.length > 0 && contexts.every((c) => c === 'lifecycle');
         // Written in a build() closure, or in a method other code calls (listener, callback): the UI must re-render.
-        const hasEventHandler = contexts.some((c) => c === "build-closure") || writes.some((w) => w.external);
+        const hasEventHandler = contexts.some((c) => c === 'build-closure') || writes.some((w) => w.external);
         const hasNestedMutation = writes.some((w) => (w.nested_depth ?? 0) > 0);
 
         let z = 1.05;
@@ -465,20 +469,20 @@ export class HeuristicBackend implements SystemOneBackend {
         p = Math.max(0.05, Math.min(0.95, p));
       }
 
-      answers.is_ui_state = { type: "noul", noul: p };
-      answers.intended_static = { type: "noul", noul: 1 - p };
+      answers.is_ui_state = { type: 'noul', noul: p };
+      answers.intended_static = { type: 'noul', noul: 1 - p };
       answers.verdict = choiceAnswer({
         desync_bug: p,
         intentionally_non_reactive: (1 - p) * 0.7,
         not_user_visible: (1 - p) * 0.2,
         insufficient_context: (1 - p) * 0.1,
       });
-    } else if (s.rule === "R3") {
+    } else if (s.rule === 'R3') {
       const appScoped =
-        typeof cand.resource === "string" && /AppStorage|globalThis|ability|Application/i.test(cand.resource);
+        typeof cand.resource === 'string' && /AppStorage|globalThis|ability|Application/i.test(cand.resource);
       const p = appScoped ? 0.4 : 0.8;
-      answers.app_lifetime = { type: "noul", noul: appScoped ? 0.6 : 0.15 };
-      answers.released_elsewhere = { type: "noul", noul: 0.15 };
+      answers.app_lifetime = { type: 'noul', noul: appScoped ? 0.6 : 0.15 };
+      answers.released_elsewhere = { type: 'noul', noul: 0.15 };
       answers.verdict = choiceAnswer({
         leak_bug: p,
         intentionally_persistent: appScoped ? 0.45 : 0.1,
@@ -490,14 +494,14 @@ export class HeuristicBackend implements SystemOneBackend {
     // Any question this heuristic doesn't model gets an uninformative answer.
     for (const [id, q] of Object.entries(questions)) {
       if (answers[id]) continue;
-      if (q.type === "noul") answers[id] = { type: "noul", noul: 0.5 };
-      else if (q.type === "choice") {
+      if (q.type === 'noul') answers[id] = { type: 'noul', noul: 0.5 };
+      else if (q.type === 'choice') {
         const labels = Object.keys(q.criteria);
         answers[id] = choiceAnswer(Object.fromEntries(labels.map((l) => [l, 1 / labels.length])));
       } else {
         const probabilities = Object.fromEntries(q.criteria.map((_, i) => [String(i), 1 / q.criteria.length]));
         answers[id] = {
-          type: "score",
+          type: 'score',
           score: (q.criteria.length - 1) / 2,
           confidence: 1 / q.criteria.length,
           legend: Object.fromEntries(q.criteria.map((d, i) => [String(i), d])),
@@ -513,7 +517,7 @@ export class HeuristicBackend implements SystemOneBackend {
 
 // Always deepseek-flash, thinking disabled: one strict tool call with self-reported probabilities.
 
-const MODEL = "deepseek-flash";
+const MODEL = 'deepseek-flash';
 
 const MAX_ATTEMPTS = 3;
 
@@ -539,15 +543,15 @@ function schemaFor(questions: Questions) {
       return [
         id,
         {
-          type: "object",
+          type: 'object',
           additionalProperties: false,
           required: labels,
-          properties: Object.fromEntries(labels.map((l) => [l, { type: "number", minimum: 0, maximum: 1 }])),
+          properties: Object.fromEntries(labels.map((l) => [l, { type: 'number', minimum: 0, maximum: 1 }])),
         },
       ];
     }),
   );
-  return { type: "object", additionalProperties: false, required: Object.keys(properties), properties };
+  return { type: 'object', additionalProperties: false, required: Object.keys(properties), properties };
 }
 
 function exampleFor(questions: Questions): string {
@@ -565,10 +569,10 @@ function exampleFor(questions: Questions): string {
 }
 
 function complete(raw: unknown, questions: Questions): raw is Record<string, Distribution> {
-  if (typeof raw !== "object" || raw === null) return false;
+  if (typeof raw !== 'object' || raw === null) return false;
   const r = raw as Record<string, Record<string, unknown>>;
   return Object.entries(questions).every(
-    ([id, q]) => typeof r[id] === "object" && r[id] !== null && labelsOf(q).every((l) => Number.isFinite(r[id][l])),
+    ([id, q]) => typeof r[id] === 'object' && r[id] !== null && labelsOf(q).every((l) => Number.isFinite(r[id][l])),
   );
 }
 
@@ -581,7 +585,7 @@ export class DeepSeekBackend implements SystemOneBackend {
 
   constructor(creds: { apiKey?: string; baseUrl?: string } = {}) {
     this.apiKey = creds.apiKey ?? process.env.DEEPSEEK_API_KEY;
-    this.baseURL = (creds.baseUrl ?? process.env.DEEPSEEK_BASE_URL ?? "https://api.deepseek.com").replace(/\/+$/, "");
+    this.baseURL = (creds.baseUrl ?? process.env.DEEPSEEK_BASE_URL ?? 'https://api.deepseek.com').replace(/\/+$/, '');
   }
 
   async systemOne(state: EntryType, questions: Questions): Promise<Result> {
@@ -599,17 +603,17 @@ export class DeepSeekBackend implements SystemOneBackend {
   private async chat(
     body: Record<string, unknown>,
     beta: boolean,
-    usage: Result["usage"] & object,
+    usage: Result['usage'] & object,
   ): Promise<ChatResponse> {
     const key = this.apiKey;
     if (!key)
       throw new Error(
-        "DeepSeek API key is not configured (deepseek.apiKey in ~/.config/arkui-sem/config.json, or DEEPSEEK_API_KEY)",
+        'DeepSeek API key is not configured (deepseek.apiKey in ~/.config/arkui-sem/config.json, or DEEPSEEK_API_KEY)',
       );
-    const res = await fetch(`${this.baseURL}${beta ? "/beta" : ""}/chat/completions`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ model: this.model, thinking: { type: "disabled" }, ...body }),
+    const res = await fetch(`${this.baseURL}${beta ? '/beta' : ''}/chat/completions`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: this.model, thinking: { type: 'disabled' }, ...body }),
     });
     if (!res.ok) throw new Error(`DeepSeek ${res.status}: ${(await res.text()).slice(0, 300)}`);
     const data = (await res.json()) as ChatResponse;
@@ -622,13 +626,13 @@ export class DeepSeekBackend implements SystemOneBackend {
   private async structured(
     state: EntryType,
     questions: Questions,
-    usage: Result["usage"] & object,
+    usage: Result['usage'] & object,
   ): Promise<Record<string, Distribution>> {
     const user = `STATE:\n${text(state)}\n\nQUESTIONS:\n${Object.entries(questions)
       .map(([id, q]) => describeQuestion(id, q))
-      .join("\n")}`;
+      .join('\n')}`;
     const schema = schemaFor(questions);
-    let lastError = "";
+    let lastError = '';
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
       const strict = attempt < MAX_ATTEMPTS; // last attempt: plain JSON mode in case the beta endpoint is unavailable
       try {
@@ -636,21 +640,21 @@ export class DeepSeekBackend implements SystemOneBackend {
           ? await this.chat(
               {
                 messages: [
-                  { role: "system", content: SYSTEM_STRUCTURED },
-                  { role: "user", content: user },
+                  { role: 'system', content: SYSTEM_STRUCTURED },
+                  { role: 'user', content: user },
                 ],
                 tools: [
                   {
-                    type: "function",
+                    type: 'function',
                     function: {
-                      name: "submit_answers",
-                      description: "Submit a probability for every allowed answer of every question.",
+                      name: 'submit_answers',
+                      description: 'Submit a probability for every allowed answer of every question.',
                       strict: true,
                       parameters: schema,
                     },
                   },
                 ],
-                tool_choice: "required",
+                tool_choice: 'required',
                 max_tokens: 4096,
               },
               true,
@@ -660,22 +664,22 @@ export class DeepSeekBackend implements SystemOneBackend {
               {
                 messages: [
                   {
-                    role: "system",
+                    role: 'system',
                     content: `${SYSTEM_STRUCTURED}\nReply with a json object shaped exactly like this example: ${exampleFor(questions)}`,
                   },
-                  { role: "user", content: user },
+                  { role: 'user', content: user },
                 ],
-                response_format: { type: "json_object" },
+                response_format: { type: 'json_object' },
                 max_tokens: 4096,
               },
               false,
               usage,
             );
         const msg = data.choices[0]?.message;
-        const raw = msg?.tool_calls?.[0]?.function.arguments ?? msg?.content ?? "";
+        const raw = msg?.tool_calls?.[0]?.function.arguments ?? msg?.content ?? '';
         const parsed = JSON.parse(raw) as unknown;
         if (complete(parsed, questions)) return parsed;
-        lastError = "response is missing questions or labels";
+        lastError = 'response is missing questions or labels';
       } catch (e) {
         lastError = (e as Error).message;
       }
@@ -687,43 +691,43 @@ export class DeepSeekBackend implements SystemOneBackend {
 // --- Backend registry ---
 
 export const BACKENDS = [
-  "heuristic",
-  "jev",
-  "laya",
-  "clef",
-  "clef-flash",
-  "or-clef",
-  "or-clef-flash",
-  "deepseek-flash",
+  'heuristic',
+  'jev',
+  'laya',
+  'clef',
+  'clef-flash',
+  'or-clef',
+  'or-clef-flash',
+  'deepseek-flash',
 ] as const;
 export type BackendName = (typeof BACKENDS)[number];
 
 export async function createBackend(name: string, creds: Credentials = {}): Promise<SystemOneBackend> {
   switch (name) {
-    case "heuristic":
+    case 'heuristic':
       return new HeuristicBackend();
-    case "jev":
+    case 'jev':
       return new JevBackend(creds.typesafeApiKey);
-    case "laya":
-      return new JevBackend(undefined, "laya", {
-        baseURL: (creds.layaBaseUrl ?? "http://127.0.0.1:8080").replace(/\/+$/, ""),
-        model: creds.layaModel ?? "laya",
+    case 'laya':
+      return new JevBackend(undefined, 'laya', {
+        baseURL: (creds.layaBaseUrl ?? 'http://127.0.0.1:8080').replace(/\/+$/, ''),
+        model: creds.layaModel ?? 'laya',
       });
-    case "clef":
-    case "clef-flash":
-      return new ClefBackend(name === "clef" ? "@cf/cloudflare/clef" : "@cf/cloudflare/clef-flash", {
+    case 'clef':
+    case 'clef-flash':
+      return new ClefBackend(name === 'clef' ? '@cf/cloudflare/clef' : '@cf/cloudflare/clef-flash', {
         accountId: creds.cloudflareAccountId,
         apiToken: creds.cloudflareApiToken,
       });
-    case "or-clef":
-    case "or-clef-flash":
-      return new OpenRouterClefBackend(name === "or-clef" ? "cloudflare/clef" : "cloudflare/clef-flash", {
+    case 'or-clef':
+    case 'or-clef-flash':
+      return new OpenRouterClefBackend(name === 'or-clef' ? 'cloudflare/clef' : 'cloudflare/clef-flash', {
         apiKey: creds.openrouterApiKey,
         baseUrl: creds.openrouterBaseUrl,
       });
-    case "deepseek-flash":
+    case 'deepseek-flash':
       return new DeepSeekBackend({ apiKey: creds.deepseekApiKey, baseUrl: creds.deepseekBaseUrl });
     default:
-      throw new Error(`Unknown backend "${name}". Expected one of: ${BACKENDS.join(", ")}`);
+      throw new Error(`Unknown backend "${name}". Expected one of: ${BACKENDS.join(', ')}`);
   }
 }
