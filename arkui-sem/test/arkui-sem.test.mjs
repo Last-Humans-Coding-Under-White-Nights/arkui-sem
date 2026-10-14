@@ -1,11 +1,12 @@
 // All tests (npm test builds first). Each section is a block with its own helpers.
-import { createServer } from "node:http";
-import { dirname, join, resolve } from "node:path";
-import { execFileSync } from "node:child_process";
-import { fileURLToPath, pathToFileURL } from "node:url";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { createServer } from "node:http";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 // --- Rules ---
 
@@ -484,7 +485,7 @@ struct P {
   const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
   const load = (p) => import(pathToFileURL(join(root, "dist", p)).href);
   const { DeepSeekBackend, Q_R1 } = await load("judge.js");
-  const { choice, noul, score } = await import("@typesafe-ai/sdk");
+  const { choice, score } = await import("@typesafe-ai/sdk");
   const requests = [];
   let behaviour = { strictFails: 0 };
 

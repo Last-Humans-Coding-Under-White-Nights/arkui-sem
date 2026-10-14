@@ -7,7 +7,7 @@
   "assist": { "actions": { "source": { "organizeImports": "on" } } },
   "linter": {
     "rules": {
-      "recommended": true,
+      "preset": "recommended",
       "style": { "useConst": "error" },
       "correctness": { "noUnusedVariables": "error", "noUnusedImports": "error" }
     }

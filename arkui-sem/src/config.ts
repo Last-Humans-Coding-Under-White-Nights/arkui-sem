@@ -1,8 +1,9 @@
 // Precedence: defaults < user config (~/.config/arkui-sem/config.json or ARKUI_SEM_CONFIG; API keys go here)
 // < project .opencode/arkui-sem.json (no secrets) < env (ARKUI_SEM_*, DEEPSEEK_API_KEY, …) < plugin options.
-import { dirname, join } from "node:path";
+
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
+import { dirname, join } from "node:path";
 
 export interface Credentials {
   deepseekApiKey?: string;

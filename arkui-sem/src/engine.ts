@@ -1,9 +1,8 @@
 // Candidates → judgments (cached) → findings/questions, and their text for agents.
 import { createHash } from "node:crypto";
-import { dirname, relative } from "node:path";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, relative } from "node:path";
 import type { Questions } from "@typesafe-ai/sdk";
-import { buildSlice, Q_R1, Q_R2, Q_R3, type SystemOneBackend } from "./judge.js";
 import {
   type Candidate,
   candidates,
@@ -12,6 +11,7 @@ import {
   NaiveExtractor,
   nestedDepth,
 } from "./analysis.js";
+import { buildSlice, Q_R1, Q_R2, Q_R3, type SystemOneBackend } from "./judge.js";
 
 // --- Formatting ---
 
@@ -117,7 +117,7 @@ function lineList(lines: number[]): string {
   return `lines ${lines.slice(0, -1).join(", ")} and ${lines[lines.length - 1]}`;
 }
 
-function describe(facts: FileFacts, c: Candidate): { subject: string; evidence: string; fix: string } {
+function describe(c: Candidate): { subject: string; evidence: string; fix: string } {
   const v2 = c.component.version === "V2";
   if (c.resource) {
     const r = c.resource;
@@ -128,7 +128,7 @@ function describe(facts: FileFacts, c: Candidate): { subject: string; evidence: 
       fix: `release it in aboutToDisappear(): ${release}.${r.kind === "listener" ? " Keep the handler in a field so off() receives the same reference." : ""}`,
     };
   }
-  const f = c.field!;
+  const f = c.field;
   const writes = f.writes
     .slice(0, 2)
     .map((w) => `${w.context} in ${w.method}() line ${w.line}`)
@@ -218,7 +218,7 @@ export async function checkFiles(
         p,
         band,
         backend: opts.backend.name,
-        ...describe(facts, c),
+        ...describe(c),
       });
     }
   }

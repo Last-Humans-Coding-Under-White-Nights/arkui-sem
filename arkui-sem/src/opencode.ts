@@ -29,7 +29,10 @@ export const ArkuiSemPlugin: Plugin = async ({ client, directory }, options) => 
 
   const session = (id: string): SessionState => {
     let s = sessions.get(id);
-    if (!s) sessions.set(id, (s = { touched: new Set(), reported: new Set(), lastGateKey: "", followups: 0 }));
+    if (!s) {
+      s = { touched: new Set(), reported: new Set(), lastGateKey: "", followups: 0 };
+      sessions.set(id, s);
+    }
     return s;
   };
 
@@ -58,9 +61,9 @@ export const ArkuiSemPlugin: Plugin = async ({ client, directory }, options) => 
       if (files.length === 0) return;
       try {
         const s = session(input.sessionID);
-        files.forEach((f) => s.touched.add(f));
+        for (const f of files) s.touched.add(f);
         const fresh = (await run(files)).filter((f) => !s.reported.has(f.fingerprint));
-        fresh.forEach((f) => s.reported.add(f.fingerprint));
+        for (const f of fresh) s.reported.add(f.fingerprint);
         if (fresh.length > 0) output.output = `${output.output}\n\n${formatForAgent(fresh, directory)}`;
       } catch (e) {
         // Never break the agent loop because the linter failed.

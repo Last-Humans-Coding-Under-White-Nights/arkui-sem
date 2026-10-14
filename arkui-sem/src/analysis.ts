@@ -256,8 +256,9 @@ function externalMethods(methods: Method[], code: string[]): Set<string> {
   const reach = (roots: string[], viaRefs: boolean) => {
     const seen = new Set(roots),
       todo = [...roots];
-    while (todo.length) {
-      const e = edges.get(todo.pop()!)!;
+    for (let m = todo.pop(); m !== undefined; m = todo.pop()) {
+      const e = edges.get(m);
+      if (!e) continue;
       for (const n of [...e.calls, ...(viaRefs ? e.refs : [])]) {
         if (!seen.has(n) && !LIFECYCLE.has(n)) {
           seen.add(n);
@@ -351,9 +352,9 @@ export class NaiveExtractor implements FactExtractor {
       i = end;
     }
     const objectLinkTypes = components.flatMap((c) =>
-      c.fields
-        .filter((f) => f.decorators.includes("@ObjectLink") && f.type)
-        .map((f) => f.type!.replace(/\[\]$/, "").trim()),
+      c.fields.flatMap((f) =>
+        f.decorators.includes("@ObjectLink") && f.type ? [f.type.replace(/\[\]$/, "").trim()] : [],
+      ),
     );
     const { classFields, arrayClasses } = this.classes(code, depthBefore, depthAfter);
     return {
@@ -491,7 +492,7 @@ export class NaiveExtractor implements FactExtractor {
           if (isBuild && !field.readsInBuild.includes(i + 1)) field.readsInBuild.push(i + 1);
           continue;
         }
-        const nested = mutatingCall ? chain.replace(/\.\w+$/, "") + "[]" : chain;
+        const nested = mutatingCall ? `${chain.replace(/\.\w+$/, "")}[]` : chain;
         const window = code.slice(Math.max(m.firstLine, i - 3), i + 1).join("\n");
         const isAsync = ASYNC_MARKERS.test(window);
         const context: WriteContext = isAsync
@@ -607,13 +608,15 @@ export type CandidateKind =
   | "ownership-intent" // R2: passed-in field; candidates() does not emit it (callers build it)
   | "unreleased-resource"; // R3: acquired in a lifecycle hook, no matching release
 
-export interface Candidate {
+/** A field candidate (R1, R2) or a resource candidate (R3). */
+export type Candidate = CandidateBase &
+  ({ field: FieldFact; resource?: never } | { resource: ResourceFact; field?: never });
+
+interface CandidateBase {
   rule: RuleId;
   kind: CandidateKind;
   file: string;
   component: ComponentFact;
-  field?: FieldFact;
-  resource?: ResourceFact;
   line: number;
   /** Nested-write: every unobserved write, in source order. */
   writes?: WriteFact[];
@@ -687,7 +690,7 @@ function typeAt(fieldType: string | undefined, segs: string[], facts: FileFacts)
 function rendersPath(f: FieldFact, path: string, facts: FileFacts): boolean {
   const arrayCall = path.endsWith("[]");
   const tail = segments(arrayCall ? path.slice(0, -2) : path)
-    .map((s) => (s.startsWith("[") ? "(?:\\?\\.)?\\[[^\\]]*\\]" : "\\??\\." + s.replace(/^\??\./, "")))
+    .map((s) => (s.startsWith("[") ? "(?:\\?\\.)?\\[[^\\]]*\\]" : `\\??\\.${s.replace(/^\??\./, "")}`))
     .join("");
   const read = new RegExp(`\\bthis\\.${f.name}${tail}${arrayCall ? "(?:(?:\\?\\.)?\\[|\\??\\.\\w)" : "(?!\\w)"}`);
   return f.readsInBuild.some((l) => read.test(facts.lines[l - 1] ?? ""));
@@ -696,14 +699,14 @@ function rendersPath(f: FieldFact, path: string, facts: FileFacts): boolean {
 /** V1: a property change on an @Observed object reaches every @ObjectLink bound to that object (OpenHarmony @Observed/@ObjectLink
  *  docs), so a deep write is seen when a child in the file takes the owning class as @ObjectLink, unless the parent renders the
  *  path itself. */
-function seenByObjectLink(f: FieldFact, w: WriteFact, facts: FileFacts): boolean {
-  const owner = typeAt(f.type, segments(w.nestedPath).slice(0, -1), facts);
+function seenByObjectLink(f: FieldFact, nestedPath: string, facts: FileFacts): boolean {
+  const owner = typeAt(f.type, segments(nestedPath).slice(0, -1), facts);
   if (owner === undefined) return false;
   const cls = className(owner);
   return (
     facts.observedClasses.includes(cls) &&
     facts.objectLinkTypes.some((t) => className(t) === cls) &&
-    !rendersPath(f, w.nestedPath!, facts)
+    !rendersPath(f, nestedPath, facts)
   );
 }
 
@@ -711,7 +714,10 @@ function seenByObjectLink(f: FieldFact, w: WriteFact, facts: FileFacts): boolean
  *  classes, unless an @ObjectLink child sees them. V2: any property write unless the class is @ObservedV2. */
 function unobservedWrites(f: FieldFact, facts: FileFacts) {
   const writes = f.writes.filter((w) => !w.disabledRules.includes("R1"));
-  if (isReactiveV1(f)) return writes.filter((w) => nestedDepth(w.nestedPath) >= 2 && !seenByObjectLink(f, w, facts));
+  if (isReactiveV1(f))
+    return writes.filter(
+      (w) => w.nestedPath !== undefined && nestedDepth(w.nestedPath) >= 2 && !seenByObjectLink(f, w.nestedPath, facts),
+    );
   const type = baseType(f.type);
   if (type !== undefined && facts.observedV2Classes.includes(type)) return [];
   return writes.filter((w) => w.nestedPath && w.nestedPath !== "[]");

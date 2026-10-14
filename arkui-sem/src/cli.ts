@@ -22,9 +22,18 @@ async function check(rest: string[]) {
   let format = "agent";
   const paths: string[] = [];
   for (let i = 0; i < rest.length; i++) {
-    if (rest[i] === "--format") format = rest[++i];
-    else if (rest[i] === "--backend") settings.backend = rest[++i];
-    else paths.push(rest[i]);
+    const arg = rest[i];
+    if (arg !== "--format" && arg !== "--backend") {
+      paths.push(arg);
+      continue;
+    }
+    const value = rest[++i];
+    if (value === undefined) {
+      process.stderr.write(`arkui-sem: ${arg} needs a value\n${USAGE}`);
+      process.exit(2);
+    }
+    if (arg === "--format") format = value;
+    else settings.backend = value;
   }
 
   const files = (paths.length ? paths : ["."]).flatMap((p) => etsFiles(absolute(p, process.cwd())));

@@ -1,15 +1,15 @@
 // Decision models: questions, spec cards, slices, and backends that answer in one TypeSafe-shaped format.
 import {
-  choice,
   type ChoiceResponse,
+  choice,
   type EntryType,
   type JsonValue,
-  noul,
   type NoulResponse,
+  noul,
   type Question,
   type Questions,
-  score,
   type ScoreResponse,
+  score,
   TypeSafeClient,
 } from "@typesafe-ai/sdk";
 import { type Candidate, type FileFacts, nestedDepth } from "./analysis.js";
@@ -323,8 +323,8 @@ export function buildSlice(
   if (c.field) {
     const f = c.field;
     lines.add(f.line);
-    f.readsInBuild.slice(0, 2).forEach((l) => lines.add(l));
-    f.writes.slice(0, 3).forEach((w) => lines.add(w.line));
+    for (const l of f.readsInBuild.slice(0, 2)) lines.add(l);
+    for (const w of f.writes.slice(0, 3)) lines.add(w.line);
     const typeName = f.type?.replace(/\[\]$/, "").trim();
     if (c.rule === "R2") {
       // No decorators: R2 asks for the intent the decorator should express.
@@ -365,7 +365,7 @@ export function buildSlice(
         type_declared_in_file: typeName ? facts.declaredClasses.includes(typeName) : null,
       };
   } else {
-    const r = c.resource!;
+    const r = c.resource;
     lines.add(r.acquireLine);
     candidate = {
       kind: c.kind,
@@ -395,40 +395,49 @@ export function buildSlice(
 
 // Deterministic name/shape heuristics; the zero-config default.
 
-const INTENTIONALLY_STATIC = /debug|log|trace|cache|tmp|temp|prev|last|timer|handle|controller|listener|(Id|Ms|Ts|At)$/;
-
 function choiceAnswer(probabilities: Record<string, number>): Answer {
   const [choice, confidence] = Object.entries(probabilities).reduce((a, b) => (b[1] > a[1] ? b : a));
   return { type: "choice", choice, confidence, probabilities };
 }
 
+/** The slice fields the heuristic reads (see buildSlice); the state arrives as untyped JSON, so any may be missing. */
+interface HeuristicSlice {
+  rule?: unknown;
+  excerpts?: unknown;
+  candidate?: { type?: unknown; writes?: unknown; resource?: unknown };
+}
+
+interface WriteSlice {
+  context?: unknown;
+  external?: unknown;
+  nested_depth?: number;
+}
+
+const strings = (v: unknown): string[] => (Array.isArray(v) ? v.filter((e) => typeof e === "string") : []);
+
 export class HeuristicBackend implements SystemOneBackend {
   readonly name = "heuristic";
 
   async systemOne(state: EntryType, questions: Questions): Promise<Result> {
-    const s = (typeof state === "object" && state !== null && !Array.isArray(state) ? state : {}) as Record<
-      string,
-      any
-    >;
-    const cand = (s.candidate ?? {}) as Record<string, any>;
+    const s: HeuristicSlice = typeof state === "object" && state !== null && !Array.isArray(state) ? state : {};
+    const cand = s.candidate ?? {};
     const answers: Record<string, Answer> = {};
 
     if (s.rule === "R1") {
       const type = typeof cand.type === "string" ? cand.type : "";
-      const writes = Array.isArray(cand.writes) ? cand.writes : [];
-      const excerpts = Array.isArray(s.excerpts) ? s.excerpts : [];
+      const writes: WriteSlice[] = Array.isArray(cand.writes) ? cand.writes : [];
+      const excerpts = strings(s.excerpts);
 
       let p = 0.55;
       if (/Controller|Scroller/i.test(type)) {
         p = 0.05;
       } else {
-        const contexts = writes.map((w: any) => w.context);
+        const contexts = writes.map((w) => w.context);
 
-        const onlyLifecycle = contexts.length > 0 && contexts.every((c: string) => c === "lifecycle");
+        const onlyLifecycle = contexts.length > 0 && contexts.every((c) => c === "lifecycle");
         // Written in a build() closure, or in a method other code calls (listener, callback): the UI must re-render.
-        const hasEventHandler =
-          contexts.some((c: string) => c === "build-closure") || writes.some((w: any) => w.external);
-        const hasNestedMutation = writes.some((w: any) => (w.nested_depth ?? 0) > 0);
+        const hasEventHandler = contexts.some((c) => c === "build-closure") || writes.some((w) => w.external);
+        const hasNestedMutation = writes.some((w) => (w.nested_depth ?? 0) > 0);
 
         let z = 1.05;
 
@@ -443,14 +452,12 @@ export class HeuristicBackend implements SystemOneBackend {
         if (writes.length > 1) z += 0.3;
         if (writes.length > 3) z += 0.7;
 
-        if (excerpts.some((e: string) => /ForEach\s*\(/i.test(e))) z += 1.8;
-        if (excerpts.some((e: string) => /\.(visibility|opacity)\s*\(/i.test(e))) z += 1.4;
-        if (excerpts.some((e: string) => /\.(scale|rotate|translate)\s*\(/i.test(e))) z += 0.6;
-        if (excerpts.some((e: string) => /\.(color|backgroundColor|fontColor|enabled)\s*\(/i.test(e))) z += 0.6;
+        if (excerpts.some((e) => /ForEach\s*\(/i.test(e))) z += 1.8;
+        if (excerpts.some((e) => /\.(visibility|opacity)\s*\(/i.test(e))) z += 1.4;
+        if (excerpts.some((e) => /\.(scale|rotate|translate)\s*\(/i.test(e))) z += 0.6;
+        if (excerpts.some((e) => /\.(color|backgroundColor|fontColor|enabled)\s*\(/i.test(e))) z += 0.6;
 
-        if (
-          excerpts.some((e: string) => /Date\.now\(\)|performance\.now\(\)|new Date\(\)|setTimeout|setInterval/.test(e))
-        ) {
+        if (excerpts.some((e) => /Date\.now\(\)|performance\.now\(\)|new Date\(\)|setTimeout|setInterval/.test(e))) {
           z -= 1.4;
         }
 

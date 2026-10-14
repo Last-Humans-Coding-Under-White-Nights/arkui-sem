@@ -14,6 +14,8 @@
   "scripts": {
     "build": "tsc -p .",
     "typecheck": "tsc -p . --noEmit",
+    "lint": "biome check .",
+    "format": "biome check --write .",
     "test": "npm run build && node test/arkui-sem.test.mjs",
     "check:fixtures": "node dist/cli.js check test/fixtures --format agent",
     "install:project": "node scripts/install.mjs"
@@ -27,5 +29,8 @@
     "@types/node": "^26.6.4",
     "tsx": "^4.20.0",
     "typescript": "^7.0.2"
+  },
+  "engines": {
+    "node": ">=22"
   }
 }
