@@ -28,7 +28,7 @@ Semantic lint for ArkTS/ArkUI declarative state (opencode v1 plugin + CLI). See 
 
 ## Conventions
 
-- ESM TypeScript, Node ≥ 22, [Google TypeScript Style Guide](https://google.github.io/styleguide/tsguide.html).
+- ESM TypeScript, Node ≥ 22, [Google TypeScript Style Guide](https://google.github.io/styleguide/tsguide.html); Biome formats at 120 columns.
 - No `any`, no non-null `!`.
 - Match the surrounding style.
 - A rule or backend change comes with a test in `test/arkui-sem.test.mjs` that runs offline.

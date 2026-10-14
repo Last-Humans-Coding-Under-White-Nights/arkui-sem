@@ -1,8 +1,9 @@
 #!/bin/sh
 # Lints staged arkui-sem files; typechecks when TypeScript is staged. Enabled by scripts/setup.mjs; skip with --no-verify.
 set -e
+git diff --cached --quiet -- arkui-sem && exit 0
 cd arkui-sem
-npx biome check --staged --no-errors-on-unmatched
+npx --no-install biome check --staged --no-errors-on-unmatched
 if git diff --cached --name-only -- '*.ts' | grep -q .; then
-  npx tsc --noEmit
+  npx --no-install tsc --noEmit
 fi

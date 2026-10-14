@@ -480,6 +480,16 @@ struct P {
     assert.ok(out.resolved.sources.includes(fresh));
   });
 
+  test('CLI: check rejects a flag without a value and an unknown format', () => {
+    for (const args of [['--format'], ['--backend'], ['--format', 'xml']]) {
+      assert.throws(
+        () => execFileSync(process.execPath, [join(root, 'dist', 'cli.js'), 'check', ...args], { stdio: 'pipe' }),
+        { status: 2 },
+        args.join(' '),
+      );
+    }
+  });
+
   console.log(`\n${passed} passed`);
 }
 

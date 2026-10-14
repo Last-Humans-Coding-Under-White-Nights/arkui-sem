@@ -15,6 +15,12 @@ const USAGE = `usage:
   arkui-sem check <file.ets|dir>... [--format agent|json] [--backend <name>]
   arkui-sem config [--init]
 `;
+const FORMATS = new Set(['agent', 'json']);
+
+function usageError(message: string): never {
+  process.stderr.write(`arkui-sem: ${message}\n${USAGE}`);
+  process.exit(2);
+}
 
 async function check(rest: string[]) {
   const settings = loadSettings();
@@ -31,10 +37,12 @@ async function check(rest: string[]) {
     }
     const value = rest[++i];
     if (value === undefined) {
-      process.stderr.write(`arkui-sem: ${arg} needs a value\n${USAGE}`);
-      process.exit(2);
+      usageError(`${arg} needs a value`);
     }
     if (arg === '--format') {
+      if (!FORMATS.has(value)) {
+        usageError(`unknown format "${value}"`);
+      }
       format = value;
     } else {
       settings.backend = value;

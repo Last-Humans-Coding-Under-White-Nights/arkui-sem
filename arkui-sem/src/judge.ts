@@ -461,7 +461,9 @@ export class HeuristicBackend implements SystemOneBackend {
 
     if (s.rule === 'R1') {
       const type = typeof cand.type === 'string' ? cand.type : '';
-      const writes: WriteSlice[] = Array.isArray(cand.writes) ? cand.writes : [];
+      const writes: WriteSlice[] = Array.isArray(cand.writes)
+        ? cand.writes.filter((w) => typeof w === 'object' && w !== null)
+        : [];
       const excerpts = strings(s.excerpts);
 
       let p = 0.55;
