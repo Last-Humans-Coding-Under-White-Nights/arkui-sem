@@ -9,8 +9,15 @@ permissions:
   contents: read
 
 jobs:
-  test:
-    runs-on: ubuntu-latest
+  platforms:
+    name: test (${{ matrix.os }})
+    # Windows: where DevEco users work, and where the LSP client's drive-letter URIs, node.exe lookup and process
+    # handling differ.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       # Without submodules: the bench is private, and the public checks must not need it.
       - uses: actions/checkout@v4
@@ -27,3 +34,11 @@ jobs:
         working-directory: arkui-sem
         env:
           ARKUI_SEM_CONFIG: /nonexistent
+
+  # The required check is named `test`; it passes only when every platform passed (a skipped job would count as passed).
+  test:
+    needs: platforms
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - run: test "${{ needs.platforms.result }}" = success

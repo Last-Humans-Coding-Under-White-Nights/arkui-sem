@@ -23,7 +23,8 @@ Semantic lint for ArkTS/ArkUI declarative state (opencode v1 plugin + CLI). See 
 - `src/judge.ts`: System One backends, questions, slices; the backend registry (`BACKENDS`).
 - `src/engine.ts`: candidates → slices → judge → findings (≥ 0.8) and questions (0.5–0.8).
 - `src/opencode.ts`: the plugin (post-edit feedback, idle gate, tools `arkui_check` / `arkui_facts`).
-- `src/config.ts`: settings merge order; `src/cli.ts`: `check`, `config`.
+- `src/config.ts`: settings merge order; `src/cli.ts`: `check`, `config`, `lsp`.
+- `src/lsp/`: ace-server client (definition, references, call hierarchy); tests use `test/fixtures/fake-ace-server.mjs`.
 - `skills/arkui-state-management/`: the skill installed next to the plugin; `scripts/install.mjs` installs both.
 
 ## Conventions

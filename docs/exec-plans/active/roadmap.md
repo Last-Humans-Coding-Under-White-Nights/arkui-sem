@@ -27,7 +27,7 @@ P-A2…P-A4 (intent tool, cross-file facts, LSP) are broken down further under R
 |---|---|---|---|
 | **P-A1** ✓ | opencode plugin vertical slice: post-edit feedback, idle gate, `arkui_check`, `arkui_facts`, skill, installer, tests | done | tests pass; tools and skill registered in opencode |
 | **P-A2** | Label log (fixes, dismissals with reasons) + `arkui_explain(id)` + `arkui_ownership_intent(component, field)` tools | 1–2 d | Labels written for every gate/finding outcome in a session |
-| **P-A3** | ArkAnalyzer + APAK extractor kept warm in the plugin process; incremental updates on edit; cross-file; parent→child edges → **R2** | 4–5 d | p95 ≤ 1.5 s per edit on the big project; E0 fact-precision ≥ 0.95 |
+| **P-A3** | ArkAnalyzer + APAK extractor kept warm in the plugin process; incremental updates on edit; cross-file, including across modules via a package index; parent→child edges → **R2** | 4–5 d | p95 ≤ 1.5 s per edit on the big project; E0 fact-precision ≥ 0.95 |
 | **P-A4** | LSP channel: an `arkui-sem` LSP server registered via `opencode.json` `lsp` for `.ets`, optionally alongside the community ArkTS language server for L0 | 3 d | A/B vs the `tool.execute.after` channel; no duplicate reports |
 | **P-A5** | Intent-aware slices: task text from the session's first user message (via `chat.message` / SDK), opt-in | 1 d | MDP / ArkState-200 lift with task context ≥ 5 pts [H] |
 | **P-A6** | Real backends calibrated: Jev, Clef-flash, fine-tuned Laya (local HTTP sidecar; Laya is Python); the zero-shot Laya baseline is in the bench | 2–3 d | Per-rule ECE ≤ 0.10; τ_hi gives precision ≥ 0.9 on dev (the bench's dev-split tooling tunes it) |
@@ -95,6 +95,7 @@ The compiler already rejects writes to a V2 `@Param` and `@Link` without `$` (ca
 | Derived state: `@Watch`, `@Monitor`, `@Computed` | ❌ | Locating only | New rule + dataset (MDP doesn't cover them) |
 | R3 unreleased resource | ✅ | Release in another file or owner object | Judge: app-lifetime or released elsewhere |
 | R4 over-reactive | ❌ | "Never written" via `references` | Rule; perf judgment |
+| Imports by package name across modules | ❌ | ❌ Needs `hvigor sync` / `ohpm install` output | Own package index: `oh-package.json5` name → module, `Index.ets` re-exports, then our parse. Without it, cross-module R1 nested-write classes, `@ObjectLink` children, R2 call sites, R3 releases and R4 writers are missed |
 
 **LSP fit:** good for the per-edit plugin, where the server stays warm and runs a few queries per edit. Poor for bench scale (thousands of items and sequential `references` calls, warm-up nondeterminism), so the bench uses a one-pass index instead.
 
