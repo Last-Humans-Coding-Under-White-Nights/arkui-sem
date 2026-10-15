@@ -12,7 +12,7 @@ become questions back to the agent.
 
 ```sh
 npm install
-npm test          # builds, then runs test/arkui-sem.test.mjs (offline, heuristic backend)
+npm test          # typechecks, then runs test/**/*.test.ts from src/ (offline, heuristic backend)
 ```
 
 ## Use in opencode

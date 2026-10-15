@@ -24,7 +24,7 @@ README.md, AGENTS.md, CLAUDE.md (@AGENTS.md), CONTRIBUTING.md, ARCHITECTURE.md
 docs/                                    see AGENTS.md for the map
 scripts/setup.mjs [--doctor]             build the linter, install the plugin into sandbox/demo, enable .githooks; runs bench/setup.mjs when present
 .githooks/pre-commit                     Biome check of staged arkui-sem/ files, typecheck when TypeScript is staged
-.github/workflows/test.yml               CI: npm ci + npm run lint + npm test in arkui-sem/ on Linux, every PR and push to main
+.github/workflows/test.yml               CI: npm ci + npm run lint + npm test in arkui-sem/ on Linux and Windows, every PR and push to main
 .github/pull_request_template.md         PR description: what and why, how it was checked, notes
 .claude/settings.json, opencode.json,    deny rules for the key file and `arkui-sem config`
 .codex/rules/arkui-sem.rules               (Codex: exact command prefixes; test with `codex execpolicy check`)
@@ -45,8 +45,9 @@ arkui-sem/                               the linter (opencode plugin, package ar
   src/config.ts        defaults < ~/.config/arkui-sem/config.json < .opencode/arkui-sem.json < env < plugin options
   src/cli.ts           arkui-sem check | config | lsp  (default backend: clef)
   src/lsp/             utility client for ace-server (ArkTS language server): definition, references, call hierarchy
-  test/arkui-sem.test.mjs  all tests (npm test, offline); test/fixtures/: Counter, Feed, Profile (R1), Ticker (R3),
-                       fake-ace-server.mjs (both LSP protocols)
+  test/                node:test, run from src/ via tsx (npm test, offline): rules/R1.test.ts, rules/R3.test.ts, one file
+                       per module (config, engine, deepseek, openrouter, opencode, lsp), helpers.ts; test/fixtures/:
+                       Counter, Feed, Profile (R1), Ticker (R3), fake-ace-server.mjs (both LSP protocols)
   skills/arkui-state-management/SKILL.md, scripts/install.mjs
   backends `or-clef` / `or-clef-flash`: Clef via OpenRouter Decisions API (POST https://openrouter.ai/api/alpha/decisions; OPENROUTER_API_KEY or openrouter.apiKey; openrouter.baseUrl)
   backend `laya`: local TypeSafe-compatible server (default http://127.0.0.1:8080; laya.baseUrl / LAYA_BASE_URL);

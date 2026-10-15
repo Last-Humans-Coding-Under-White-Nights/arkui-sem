@@ -4,7 +4,7 @@ Semantic lint for ArkTS/ArkUI declarative state (opencode v1 plugin + CLI). See 
 
 ## Build and test
 
-- `npm install`, then `npm test` (builds `dist/`, runs `test/arkui-sem.test.mjs`).
+- `npm install`, then `npm test` (`node:test`, runs from `src/` without a build).
 - Tests are offline. Run them with `ARKUI_SEM_CONFIG` pointing at a nonexistent file so no user config or key is loaded.
 - `npm run lint` (Biome), `npm run format` to fix. CI and the pre-commit hook run it too.
 - `dist/` is build output: edit `src/`, never `dist/`. Rebuild before using the CLI or the plugin.
@@ -32,7 +32,7 @@ Semantic lint for ArkTS/ArkUI declarative state (opencode v1 plugin + CLI). See 
 - ESM TypeScript, Node ≥ 22, [Google TypeScript Style Guide](https://google.github.io/styleguide/tsguide.html); Biome formats at 120 columns.
 - No `any`, no non-null `!`.
 - Match the surrounding style.
-- A rule or backend change comes with a test in `test/arkui-sem.test.mjs` that runs offline.
+- A rule or backend change comes with an offline test: `test/rules/R<n>.test.ts` or `test/<module>.test.ts`, helpers in `test/helpers.ts`.
 - Commit messages describe the linter change only.
 
 ## Comments
