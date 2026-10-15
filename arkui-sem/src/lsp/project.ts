@@ -112,6 +112,8 @@ export function initializeParams(projectRoot: string, paths: LspPaths, workDir: 
   );
   mkdirSync(indexDir, { recursive: true });
   return {
+    // Required in LSP InitializeParams.
+    processId: process.pid,
     rootUri,
     capabilities: {},
     // The server refuses to start without rootUri, lspServerWorkspacePath and modules.

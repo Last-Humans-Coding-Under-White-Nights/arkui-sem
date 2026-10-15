@@ -79,6 +79,8 @@ export class JsonRpc extends EventEmitter<JsonRpcEvents> {
       }
       const timer = setTimeout(() => {
         this.pending.delete(id);
+        // Otherwise the server keeps working on it and later requests queue behind.
+        this.notify('$/cancelRequest', { id });
         reject(new Error(`${method} timed out after ${timeoutMs} ms`));
       }, timeoutMs);
       this.pending.set(id, { resolve, reject, timer });

@@ -186,11 +186,11 @@ abstract class Session implements ArktsLsp {
     }
     const exited = new Promise<void>((r) => this.rpc.once('exit', () => r()));
     try {
-      await this.rpc.request('shutdown', null, 3000);
+      await this.rpc.request('shutdown', undefined, 3000);
     } catch {
       /* ends with kill below */
     }
-    this.rpc.notify('exit', null);
+    this.rpc.notify('exit', undefined);
     let grace: NodeJS.Timeout | undefined;
     await Promise.race([exited, new Promise((r) => (grace = setTimeout(r, 3000)))]);
     clearTimeout(grace);
