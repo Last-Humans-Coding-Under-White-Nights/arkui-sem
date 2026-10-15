@@ -70,4 +70,4 @@ If these are rare, keep the current design.
 
 - `src/opencode.ts`: before-hook baseline, commit triggers, pending state per session.
 - `src/engine.ts`: line-free cache key, `checkDelta(baseline, current)`.
-- `test/arkui-sem.test.mjs`: replay an edit sequence and assert the judge call count and that there are no in-between findings.
+- `test/opencode.test.ts`: replay an edit sequence and assert the judge call count and that there are no in-between findings.

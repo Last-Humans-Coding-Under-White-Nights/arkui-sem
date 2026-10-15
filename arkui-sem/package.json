@@ -16,7 +16,8 @@
     "typecheck": "tsc -p . --noEmit",
     "lint": "biome check .",
     "format": "biome check --write .",
-    "test": "npm run build && node test/arkui-sem.test.mjs",
+    "test": "npm run typecheck && node --import tsx --test \"test/**/*.test.ts\"",
+    "test:watch": "node --import tsx --test --watch \"test/**/*.test.ts\"",
     "check:fixtures": "node dist/cli.js check test/fixtures --format agent",
     "install:project": "node scripts/install.mjs"
   },
