@@ -10,6 +10,7 @@ import {
   type FileFacts,
   NaiveExtractor,
   nestedDepth,
+  type V2Gap,
 } from './analysis.js';
 import { buildSlice, Q_R1, Q_R2, Q_R3, type SystemOneBackend } from './judge.js';
 
@@ -127,6 +128,34 @@ function lineList(lines: number[]): string {
   return `lines ${lines.slice(0, -1).join(', ')} and ${lines[lines.length - 1]}`;
 }
 
+function gapReason(g: V2Gap): string {
+  switch (g.kind) {
+    case 'class':
+    case 'untraced':
+      return 'V2 sees a property write only when the property is @Trace on an @ObservedV2 class';
+    case 'object-type':
+    case 'object-literal':
+      return 'V2 never observes plain objects';
+    case 'nested-container':
+      return "V2 doesn't observe containers nested in containers";
+  }
+}
+
+function gapFix(g: V2Gap): string {
+  switch (g.kind) {
+    case 'class':
+      return `mark class ${g.owner} @ObservedV2 and the mutated properties @Trace`;
+    case 'object-type':
+      return `make ${g.owner} an @ObservedV2 class with @Trace on the mutated properties and create its objects with new`;
+    case 'object-literal':
+      return `reassign ${g.owner} with a new object, or make it an @ObservedV2 class instance with @Trace on the mutated properties`;
+    case 'nested-container':
+      return `assign a new inner array or map to ${g.owner} instead of changing it in place`;
+    case 'untraced':
+      return `mark ${g.owner}.${g.property} @Trace`;
+  }
+}
+
 function describe(c: Candidate): { subject: string; evidence: string; fix: string } {
   const v2 = c.component.version === 'V2';
   if (c.resource) {
@@ -146,16 +175,15 @@ function describe(c: Candidate): { subject: string; evidence: string; fix: strin
   if (c.kind === 'nested-write-unobserved') {
     const [w, ...rest] = c.writes?.length ? c.writes : f.writes;
     const path = w?.nestedPath ?? '';
-    const type = f.type?.replace(/\[\]$/, '') ?? '<its class>';
     const first = path.match(/^\??\.(\w+)/)?.[1];
     const otherLines = [...new Set(rest.map((x) => x.line))].filter((l) => l !== w.line);
     const also = otherLines.length ? `; also written in place at ${lineList(otherLines)}` : '';
     const at = `${w?.context} in ${w?.method}() line ${w?.line}${also}`;
-    if (v2) {
+    if (c.gaps) {
       return {
         subject: `${c.component.name}.${f.name}${path}`,
-        evidence: `${f.decorators.join(' ')} field's property written in place (${at}); V2 state only sees reassignment unless the class is @ObservedV2`,
-        fix: `mark class ${type} @ObservedV2 and the mutated properties @Trace.`,
+        evidence: `${f.decorators.join(' ')} field's property written in place (${at}); ${[...new Set(c.gaps.map(gapReason))].join('; ')}`,
+        fix: `${[...new Set(c.gaps.map(gapFix))].join('; ')}.`,
       };
     }
     return {

@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { ArkuiSemPlugin } from '../src/opencode.js';
-import { ROOT, tempDir } from './helpers.js';
+import { put, ROOT, tempDir } from './helpers.js';
 
 const data = tempDir();
 process.env.ARKUI_SEM_DATA_DIR = data;
@@ -103,4 +103,12 @@ test('arkui_facts tool returns ownership facts', async () => {
   assert.deepEqual(count.decorators, []);
   assert.equal(count.writes[0].context, 'build-closure');
   assert.equal(facts.components.find((c: any) => c.name === 'GoodCounterV2').stateManagement, 'V2');
+});
+
+test('arkui_facts lists only classes declared in the file, by their source names', async () => {
+  const dir = tempDir();
+  put(join(dir, 'model.ets'), '@Observed\nexport class Info {\n  n: number = 0\n}');
+  const page = put(join(dir, 'P.ets'), "import { Info } from './model'\n@Observed\nclass Local {\n  n: number = 0\n}");
+  const facts = JSON.parse(await hooks.tool.arkui_facts.execute({ file: page }, ctx));
+  assert.deepEqual(facts.observedClasses, ['Local']);
 });
