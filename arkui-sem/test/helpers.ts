@@ -14,8 +14,11 @@ export const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 /** Node arguments that run the CLI from source, from any cwd. */
 export const CLI = ['--import', import.meta.resolve('tsx'), join(ROOT, 'src', 'cli.ts')];
 
+/** Facts of an ArkTS source, read as the file at path (relative imports resolve from there). */
+export const extract = (src: string, path = 'T.ets') => new NaiveExtractor().extract(path, src);
+
 /** Rule candidates in an inline ArkTS source (no judge). */
-export const found = (src: string) => candidates(new NaiveExtractor().extract('T.ets', src));
+export const found = (src: string, path?: string) => candidates(extract(src, path));
 
 /** A fresh temp dir, removed when the file's tests end. */
 export function tempDir(): string {

@@ -14,6 +14,8 @@ export interface WriteFact {
   method: string;
   /** Property path below the field for in-place mutation ("title", "items[]"); absent for reassignment. */
   nestedPath?: string;
+  /** For an assignment (`=`, compound or update), what the assigned value is. */
+  value?: 'object-literal' | 'new' | 'other';
   /** The writing method is reached neither from build()/@Builder nor from lifecycle hooks: other code calls it. */
   external?: boolean;
   disabledRules: string[];
@@ -25,6 +27,8 @@ export interface FieldFact {
   decorators: string[];
   type?: string;
   hasInitializer: boolean;
+  /** Text of an object-literal initializer (`{…}`, possibly cut at the line end): a plain object, whatever the type. */
+  literal?: string;
   readsInBuild: number[];
   writes: WriteFact[];
   disabledRules: string[];
@@ -58,11 +62,24 @@ export interface FileFacts {
   observedV2Classes: string[];
   objectLinkTypes: string[];
   declaredClasses: string[];
-  /** Declared field types of the classes in the file: class → field → type text. */
-  classFields: Record<string, Record<string, string>>;
+  /** Interfaces and object type aliases. */
+  declaredTypes: string[];
+  /** Members of the classes, interfaces and object type aliases: class → member name → its facts. */
+  classMembers: Record<string, Record<string, ClassMember>>;
+  /** What each class or interface in the file extends (other than Array): child → parent names. */
+  classParents: Record<string, string[]>;
   /** Classes that extend Array<…>: class → element type text and the class's own type parameters. */
   arrayClasses: Record<string, { element: string; params: string[] }>;
   lines: string[];
+}
+
+export interface ClassMember {
+  decorators: string[];
+  setter: boolean;
+  /** Fields: the declared type, else the class of a `new X(…)` initializer. */
+  type?: string;
+  /** Text of an object-literal initializer, as for FieldFact. */
+  literal?: string;
 }
 
 export interface FactExtractor {
@@ -134,10 +151,43 @@ const MUTATING_CALLS = new Set([
 ]);
 const ASYNC_MARKERS = /\.then\(|\bawait\b|setTimeout\(|setInterval\(|\.on\(|subscribe\(/;
 
-/** Blank out comments and string contents (keeping `${…}` expressions), preserving offsets and newlines. */
+/** Brace depth before each line, and after a given line. */
+function braceDepths(code: string[]): { depthBefore: number[]; depthAfter: (i: number) => number } {
+  const depthBefore: number[] = [];
+  let depth = 0;
+  for (const line of code) {
+    depthBefore.push(depth);
+    depth += count(line, '{') - count(line, '}');
+  }
+  return { depthBefore, depthAfter: (i) => depthBefore[i] + count(code[i], '{') - count(code[i], '}') };
+}
+
+/** Code before a / that starts a regex literal rather than a division: an operator or opening bracket, a logical not (a
+ *  non-null assertion `x!` follows its operand directly), or a keyword. */
+const REGEX_BEFORE = /(?:[(,=:[&|?{};+\-*%<>~^}]|(?:^|[^\w$)\]])!|\b(?:return|typeof|case|in|of))$/;
+
+/** Whether a / after out starts a regex: judged by the code before it, across line breaks (after a name or a closing
+ *  bracket it divides, even on a continuation line). */
+function regexAllowed(out: string[]): boolean {
+  let k = out.length - 1;
+  while (k >= 0 && out[k].trim() === '') {
+    k--; // whitespace, including blanked comments
+  }
+  let before = '';
+  for (; k >= 0 && before.length < 64; k--) {
+    before = out[k] + before;
+  }
+  before = before.trimEnd();
+  // A postfix ++ or -- ends an operand, so the / divides.
+  return before === '' || (REGEX_BEFORE.test(before) && !/[\w$)\]](?:\+\+|--)$/.test(before));
+}
+
+/** Blank out comments, string contents (keeping `${…}` expressions) and regex literal contents, preserving offsets and
+ *  newlines. */
 function blank(text: string): string {
-  let out = '';
-  let state: 'code' | 'sq' | 'dq' | 'tpl' | 'lc' | 'bc' = 'code';
+  const out: string[] = [];
+  let state: 'code' | 'sq' | 'dq' | 'tpl' | 'lc' | 'bc' | 're' = 'code';
+  let reClass = false; // inside [...] of a regex literal, where / doesn't end it
   const exprDepth: number[] = [];
   for (let i = 0; i < text.length; ) {
     const c = text[i];
@@ -146,19 +196,26 @@ function blank(text: string): string {
       case 'code':
         if (c === '/' && d === '/') {
           state = 'lc';
-          out += '  ';
+          out.push('  ');
           i += 2;
           continue;
         }
         if (c === '/' && d === '*') {
           state = 'bc';
-          out += '  ';
+          out.push('  ');
           i += 2;
           continue;
         }
         if (c === "'" || c === '"' || c === '`') {
           state = c === "'" ? 'sq' : c === '"' ? 'dq' : 'tpl';
-          out += c;
+          out.push(c);
+          i++;
+          continue;
+        }
+        if (c === '/' && regexAllowed(out)) {
+          state = 're';
+          reClass = false;
+          out.push(c);
           i++;
           continue;
         }
@@ -170,78 +227,93 @@ function blank(text: string): string {
             if (exprDepth[top] === 0) {
               exprDepth.pop();
               state = 'tpl';
-              out += c;
+              out.push(c);
               i++;
               continue;
             }
             exprDepth[top]--;
           }
         }
-        out += c;
+        out.push(c);
+        i++;
+        continue;
+      case 're':
+        if (c === '\\' && d !== '\n') {
+          out.push('  ');
+          i += 2;
+          continue;
+        }
+        if ((c === '/' && !reClass) || c === '\n') {
+          state = 'code';
+          out.push(c);
+        } else {
+          reClass = c === '[' ? true : c === ']' ? false : reClass;
+          out.push(' ');
+        }
         i++;
         continue;
       case 'lc':
         if (c === '\n') {
           state = 'code';
-          out += c;
+          out.push(c);
         } else {
-          out += ' ';
+          out.push(' ');
         }
         i++;
         continue;
       case 'bc':
         if (c === '*' && d === '/') {
           state = 'code';
-          out += '  ';
+          out.push('  ');
           i += 2;
           continue;
         }
-        out += c === '\n' ? '\n' : ' ';
+        out.push(c === '\n' ? '\n' : ' ');
         i++;
         continue;
       case 'sq':
       case 'dq': {
         const quote = state === 'sq' ? "'" : '"';
         if (c === '\\') {
-          out += d === '\n' ? ' \n' : '  ';
+          out.push(d === '\n' ? ' \n' : '  ');
           i += 2;
           continue;
         }
         if (c === quote || c === '\n') {
           state = 'code';
-          out += c;
+          out.push(c);
           i++;
           continue;
         }
-        out += ' ';
+        out.push(' ');
         i++;
         continue;
       }
       case 'tpl':
         if (c === '\\') {
-          out += d === '\n' ? ' \n' : '  ';
+          out.push(d === '\n' ? ' \n' : '  ');
           i += 2;
           continue;
         }
         if (c === '`') {
           state = 'code';
-          out += c;
+          out.push(c);
           i++;
           continue;
         }
         if (c === '$' && d === '{') {
-          out += '${';
+          out.push('${');
           i += 2;
           state = 'code';
           exprDepth.push(0);
           continue;
         }
-        out += c === '\n' ? '\n' : ' ';
+        out.push(c === '\n' ? '\n' : ' ');
         i++;
         continue;
     }
   }
-  return out;
+  return out.join('');
 }
 
 function count(s: string, ch: string) {
@@ -259,7 +331,7 @@ function externalMethods(methods: Method[], code: string[]): Set<string> {
       const calls = new Set<string>();
       const refs = new Set<string>();
       for (let i = m.firstLine; i <= m.lastLine; i++) {
-        for (const h of code[i].matchAll(/this\.(\w+)(\s*\()?/g)) {
+        for (const h of code[i].matchAll(/this\.([\w$]+)(\s*\()?/g)) {
           if (names.has(h[1]) && h[1] !== m.name) {
             (h[2] ? calls : refs).add(h[1]);
           }
@@ -308,12 +380,168 @@ interface Method {
 
 const DECORATOR = /@\w+(?:\([^)]*\))?/g;
 const DECORATOR_ONLY = /^\s*(?:@\w+(?:\([^)]*\))?\s*)+$/;
-const METHOD = /^\s*(?:(?:private|public|protected|static|async)\s+)*(\w+)\s*(?:<[^>]*>)?\s*\(/;
-const FIELD =
-  /^\s*(?:(?:private|public|protected|static|readonly)\s+)*(\w+)\s*[?!]?\s*(?::\s*([^=;]+?))?\s*(=.*)?;?\s*$/;
+const DECORATOR_PREFIX = /^\s*(?:@\w+(?:\([^)]*\))?\s*)*/;
+/** Member modifiers before a name. */
+const MODIFIERS = String.raw`(?:(?:private|public|protected|static|readonly|override|declare|accessor|abstract|async)\s+)*`;
+const METHOD = new RegExp(String.raw`^\s*${MODIFIERS}([\w$]+)\s*(?:<[^>]*>)?\s*\(`);
+const FIELD = new RegExp(
+  String.raw`^\s*${MODIFIERS}([\w$]+)\s*[?!]?\s*(?::\s*((?:=>|\{(?:[^{}]|\{[^{}]*\})*\}|[^=;{])+?))?\s*(=(?!>).*?)?[;,]?\s*$`,
+);
+
+const NEW_INSTANCE = /^\s*new\s+([\w$]+(?:\s*<[^()]*>)?)\s*\(/;
+
+/** A FIELD match's declared type, else the class of a `= new X(…)` initializer. */
+function fieldType(fm: RegExpMatchArray): string | undefined {
+  return fm[2]?.trim() ?? fm[3]?.replace(/^=/, '').match(NEW_INSTANCE)?.[1];
+}
+
+function literalOf(fm: RegExpMatchArray): string | undefined {
+  const init = fm[3]?.replace(/^=\s*/, '');
+  return init?.startsWith('{') ? init : undefined;
+}
+
+/** The value text of prop in an object literal's text, when the literal spells it out. */
+function literalValue(literal: string, prop: string): string | undefined {
+  const body = literal.replace(/^\{/, '').replace(/\}[\s;]*$/, '');
+  for (const part of splitTopLevel(body, ',;')) {
+    const m = part.match(/^\s*([\w$]+)\s*:\s*([\s\S]*?)\s*$/);
+    if (m?.[1] === prop) {
+      return m[2];
+    }
+  }
+  return undefined;
+}
+
+const CLOSES: Record<string, string> = { ')': '(', ']': '[', '}': '{', '>': '<' };
+
+/** Members of a class or struct body after the line open, through the line close (its text before the closing brace), at
+ *  depth: each member's first and last
+ *  line. A member runs until the next line at member depth that starts code outside an open ( or [ (wrapped parameters,
+ *  calls, arrays and an own-line body brace stay with their member). Brackets count only on lines at or returning to member
+ *  depth, so method bodies can't unbalance them. */
+function memberRanges(
+  code: string[],
+  depthBefore: number[],
+  open: number,
+  close: number,
+  depth: number,
+): { first: number; last: number }[] {
+  const out: { first: number; last: number }[] = [];
+  let unclosed = 0;
+  for (let i = open + 1; i <= close; i++) {
+    // The closing line holds a member only before its closing brace (`  @Trace age = 0 }`).
+    const line = i === close ? code[i].slice(0, code[i].lastIndexOf('}')) : code[i];
+    const startsMember = !/^\s*(?:\{|$)/.test(line); // a body brace on its own line continues the member above
+    if (depthBefore[i] === depth + 1 && unclosed === 0 && startsMember) {
+      out.push({ first: i, last: i });
+    } else if (out.length > 0) {
+      out[out.length - 1].last = i;
+    }
+    const touchesMembers =
+      depthBefore[i] === depth + 1 || depthBefore[i] + count(line, '{') - count(line, '}') === depth + 1;
+    if (touchesMembers) {
+      unclosed = Math.max(0, unclosed + count(line, '(') + count(line, '[') - count(line, ')') - count(line, ']'));
+    }
+  }
+  return out;
+}
+
+/** A class, interface or object type alias declared on line: its name, type parameter text, and where its header continues
+ *  (after the type parameters). */
+function typeHeader(
+  line: string,
+): { kind: 'class' | 'interface' | 'type'; name: string; typeParams?: string; end: number } | undefined {
+  const m = line.match(/\b(class|interface|type)\s+(\w+)\s*/);
+  if (!m) {
+    return undefined;
+  }
+  let end = (m.index ?? 0) + m[0].length;
+  let typeParams: string | undefined;
+  if (line[end] === '<') {
+    const close = end + splitTopLevel(line.slice(end + 1), '>')[0].length + 1;
+    typeParams = line.slice(end + 1, close);
+    end = close + 1;
+  }
+  if (m[1] === 'type' && !/^\s*=\s*\{/.test(line.slice(end))) {
+    return undefined;
+  }
+  return { kind: m[1] as 'class' | 'interface' | 'type', name: m[2], typeParams, end };
+}
+
+/** Splits text at separators outside (), [], {} and type arguments. A < opens type arguments only right after a name
+ *  (`Map<`, not `a < b`), and a > closes only an open < (not an arrow's =>). With afterBlock, a top-level } followed by a
+ *  name or decorator also ends a part (a method body in a one-line class). */
+function splitTopLevel(text: string, separators: string, afterBlock = false): string[] {
+  const parts: string[] = [];
+  const open: string[] = [];
+  let start = 0;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if ('([{'.includes(c) || (c === '<' && /\w/.test(text[i - 1] ?? ''))) {
+      open.push(c);
+    } else if (c in CLOSES && open.at(-1) === CLOSES[c] && !(c === '>' && text[i - 1] === '=')) {
+      open.pop();
+      if (afterBlock && c === '}' && open.length === 0 && /^\s*[@\w$]/.test(text.slice(i + 1))) {
+        parts.push(text.slice(start, i + 1));
+        start = i + 1;
+      }
+    } else if (open.length === 0 && separators.includes(c)) {
+      parts.push(text.slice(start, i));
+      start = i + 1;
+    }
+  }
+  parts.push(text.slice(start));
+  return parts;
+}
+
+/** Feeds a member-level line to pending decorators: true when the line is blank or holds only decorators. */
+function decoratorLine(line: string, pending: string[]): boolean {
+  if (line.trim() === '') {
+    return true;
+  }
+  if (DECORATOR_ONLY.test(line)) {
+    pending.push(...decoratorsOf(line));
+    return true;
+  }
+  return false;
+}
 
 function decoratorsOf(s: string): string[] {
   return (s.match(DECORATOR) ?? []).map((d) => d.replace(/\(.*$/, ''));
+}
+
+function assignedValue(tail: string): WriteFact['value'] {
+  const value = tail.match(/^\s*=\s*(.*)$/)?.[1];
+  return value?.startsWith('{') ? 'object-literal' : value !== undefined && /^new\b/.test(value) ? 'new' : 'other';
+}
+
+/** An assignment or update operator after a target: =, compound and logical assignments, ++ and --. */
+const ASSIGN_OP = String.raw`(?:(?:\?\?|\|\||&&|\*\*|<<|>>>?|[-+*/%&|^])?=(?![=>])|\+\+|--)`;
+const ASSIGNED_AFTER = new RegExp(`^\\s*${ASSIGN_OP}`);
+const FIELD_REASSIGNED = /\bthis\.([\w$]+)\s*=(?![=>])/g;
+
+const SETTER = new RegExp(String.raw`^\s*${MODIFIERS}set\s+([\w$]+)\s*\(`);
+
+/** What a member's first line (decorators removed) declares. */
+function memberKind(
+  rest: string,
+): { kind: 'setter' | 'method'; name: string } | { kind: 'field'; fm: RegExpMatchArray } | undefined {
+  const setter = rest.match(SETTER)?.[1];
+  if (setter !== undefined) {
+    return { kind: 'setter', name: setter };
+  }
+  const mm = rest.match(METHOD);
+  if (mm && !/^\s*\w+\s*[?!]?\s*:/.test(rest)) {
+    return { kind: 'method', name: mm[1] };
+  }
+  const fm = rest.match(FIELD);
+  return fm ? { kind: 'field', fm } : undefined;
+}
+
+/** A member line's leading decorators and the code after them. */
+function splitDecorators(line: string): { decorators: string[]; rest: string } {
+  const prefix = line.match(DECORATOR_PREFIX)?.[0] ?? '';
+  return { decorators: decoratorsOf(prefix), rest: line.slice(prefix.length) };
 }
 
 function disabledRulesAt(raw: string[], index: number): string[] {
@@ -327,22 +555,12 @@ export class NaiveExtractor implements FactExtractor {
 
   extract(file: string, text: string): FileFacts {
     const raw = text.split(/\r?\n/);
-    const code = blank(text).split(/\r?\n/);
-
-    const depthBefore: number[] = [];
-    let depth = 0;
-    for (const line of code) {
-      depthBefore.push(depth);
-      depth += count(line, '{') - count(line, '}');
-    }
-    function depthAfter(i: number) {
-      return depthBefore[i] + count(code[i], '{') - count(code[i], '}');
-    }
-
-    const flat = blank(text);
-    const observedClasses = [...flat.matchAll(/@Observed\s+(?:export\s+)?class\s+(\w+)/g)].map((m) => m[1]);
-    const observedV2Classes = [...flat.matchAll(/@ObservedV2\s+(?:export\s+)?class\s+(\w+)/g)].map((m) => m[1]);
-    const declaredClasses = [...flat.matchAll(/\bclass\s+(\w+)/g)].map((m) => m[1]);
+    const blanked = blank(text);
+    const code = blanked.split(/\r?\n/);
+    const { depthBefore, depthAfter } = braceDepths(code);
+    const observed = [
+      ...blanked.matchAll(/@Observed(V2)?\s+(?:export\s+(?:default\s+)?)?(?:abstract\s+)?class\s+(\w+)/g),
+    ];
 
     const components: ComponentFact[] = [];
     for (let i = 0; i < code.length; i++) {
@@ -373,26 +591,22 @@ export class NaiveExtractor implements FactExtractor {
           raw,
           code,
           depthBefore,
-          depthAfter,
         ),
       );
       i = end;
     }
     const objectLinkTypes = components.flatMap((c) =>
       c.fields.flatMap((f) =>
-        f.decorators.includes('@ObjectLink') && f.type ? [f.type.replace(/\[\]$/, '').trim()] : [],
+        f.decorators.includes('@ObjectLink') && f.type ? [className(f.type).replace(/\[\]$/, '')] : [],
       ),
     );
-    const { classFields, arrayClasses } = this.classes(code, depthBefore, depthAfter);
     return {
       file,
       components,
-      observedClasses,
-      observedV2Classes,
+      observedClasses: observed.filter((m) => !m[1]).map((m) => m[2]),
+      observedV2Classes: observed.filter((m) => m[1]).map((m) => m[2]),
       objectLinkTypes,
-      declaredClasses,
-      classFields,
-      arrayClasses,
+      ...this.classes(code, depthBefore, depthAfter),
       lines: raw,
     };
   }
@@ -401,44 +615,101 @@ export class NaiveExtractor implements FactExtractor {
     code: string[],
     depthBefore: number[],
     depthAfter: (i: number) => number,
-  ): Pick<FileFacts, 'classFields' | 'arrayClasses'> {
-    const classFields: FileFacts['classFields'] = {};
+  ): Pick<FileFacts, 'declaredClasses' | 'declaredTypes' | 'classMembers' | 'classParents' | 'arrayClasses'> {
+    const declaredClasses: string[] = [];
+    const declaredTypes: string[] = [];
+    const classMembers: FileFacts['classMembers'] = {};
+    const classParents: FileFacts['classParents'] = {};
     const arrayClasses: FileFacts['arrayClasses'] = {};
     for (let i = 0; i < code.length; i++) {
-      const cm = code[i].match(/\bclass\s+(\w+)\s*(?:<([^>]*)>)?/);
-      if (!cm) {
+      const decl = typeHeader(code[i]);
+      if (!decl) {
         continue;
       }
-      const am = code[i].match(/\bextends\s+Array\s*<(.+?)>\s*(?:implements\b[^{]*)?(?:\{|$)/);
+      const { name, typeParams } = decl;
+      (decl.kind === 'class' ? declaredClasses : declaredTypes).push(name);
+      let open = i; // the header may wrap; its body opens on this line
+      while (open + 1 < code.length && open < i + 4 && !code[open].includes('{')) {
+        open++;
+      }
+      const header = code
+        .slice(i, open + 1)
+        .join(' ')
+        .slice(decl.end)
+        .replace(/\{.*$/, '');
+      const parents = splitTopLevel(header.match(/^\s*extends\s+(.*?)(?:\bimplements\b.*)?$/)?.[1] ?? '', ',')
+        .map((p) => p.trim().match(/^\w+/)?.[0])
+        .filter((p): p is string => p !== undefined && p !== 'Array');
+      if (parents.length > 0) {
+        classParents[name] = parents;
+      }
+      const am = header.match(/\bextends\s+Array\s*<(.+?)>\s*(?:implements\b.*)?$/);
       if (am) {
-        arrayClasses[cm[1]] = {
+        arrayClasses[name] = {
           element: am[1].trim(),
-          params: (cm[2] ?? '')
-            .split(',')
+          params: splitTopLevel(typeParams ?? '', ',')
             .map((p) => p.trim().split(/\s/)[0])
             .filter(Boolean),
         };
       }
-      const classDepth = depthBefore[i];
-      const fields: Record<string, string> = {};
-      classFields[cm[1]] = fields;
-      if (code[i].includes('{') && depthAfter(i) <= classDepth) {
-        continue; // body opens and closes on the header line
+      const classDepth = depthBefore[open];
+      const memberFacts: Record<string, ClassMember> = {};
+      classMembers[name] = memberFacts;
+      let end = open;
+      // Each member's first line, and its text through to the next member (parameters, body).
+      let members: { head: string; text: string }[];
+      if (code[open].includes('{') && depthAfter(open) <= classDepth) {
+        const body = code[open].slice(code[open].indexOf('{') + 1, code[open].lastIndexOf('}'));
+        members = splitTopLevel(body, ';,', true).map((m) => ({ head: m, text: m }));
+      } else {
+        while (end + 1 < code.length && !(end > open && depthAfter(end) <= classDepth)) {
+          end++;
+        }
+        members = memberRanges(code, depthBefore, open, end, classDepth).map(({ first, last }) => ({
+          head: code[first],
+          text: code.slice(first, last + 1).join('\n'),
+        }));
       }
-      let end = i;
-      while (end + 1 < code.length && !(end > i && depthAfter(end) <= classDepth)) {
-        end++;
-        if (depthBefore[end] !== classDepth + 1) {
+      let pending: string[] = [];
+      const bodies: string[] = []; // method and arrow-function property texts
+      for (const member of members) {
+        if (decoratorLine(member.head, pending)) {
           continue;
         }
-        const fm = code[end].replace(/^\s*(?:@\w+(?:\([^)]*\))?\s*)*/, '').match(FIELD);
-        if (fm?.[2]) {
-          fields[fm[1]] = fm[2].trim();
+        const { decorators, rest } = splitDecorators(member.head);
+        const all = [...pending, ...decorators];
+        pending = [];
+        const kind = memberKind(rest);
+        if (kind?.kind === 'setter') {
+          memberFacts[kind.name] = { decorators: all, setter: true };
+          bodies.push(member.text);
+        } else if (kind?.kind === 'method') {
+          memberFacts[kind.name] = { decorators: all, setter: false };
+          bodies.push(member.text);
+        } else if (kind?.kind === 'field') {
+          const { fm } = kind;
+          const arrow = fm[3]?.includes('=>');
+          memberFacts[fm[1]] = {
+            decorators: all,
+            setter: false,
+            type: fieldType(fm),
+            literal: literalOf(fm),
+          };
+          if (arrow) {
+            bodies.push(member.text);
+          }
+        }
+      }
+      // A literal initializer is the value only while no method or constructor reassigns the field.
+      const assigned = new Set(bodies.flatMap((b) => [...b.matchAll(FIELD_REASSIGNED)].map((m) => m[1])));
+      for (const [n, m] of Object.entries(memberFacts)) {
+        if (m.literal !== undefined && assigned.has(n)) {
+          memberFacts[n] = { ...m, literal: undefined };
         }
       }
       i = end;
     }
-    return { classFields, arrayClasses };
+    return { declaredClasses, declaredTypes, classMembers, classParents, arrayClasses };
   }
 
   private component(
@@ -451,31 +722,23 @@ export class NaiveExtractor implements FactExtractor {
     raw: string[],
     code: string[],
     depthBefore: number[],
-    depthAfter: (i: number) => number,
   ): ComponentFact {
     const fields: FieldFact[] = [];
     const methods: Method[] = [];
     let pending: string[] = [];
     let pendingStart = -1;
 
-    for (let i = start + 1; i < end; i++) {
-      if (depthBefore[i] !== structDepth + 1) {
-        continue;
-      }
+    for (const { first: i, last } of memberRanges(code, depthBefore, start, end, structDepth)) {
       const line = code[i];
-      if (line.trim() === '') {
-        continue;
-      }
-      if (DECORATOR_ONLY.test(line)) {
-        if (pending.length === 0) {
+      const pendingBefore = pending.length;
+      if (decoratorLine(line, pending)) {
+        if (pendingBefore === 0 && pending.length > 0) {
           pendingStart = i;
         }
-        pending.push(...decoratorsOf(line));
         continue;
       }
 
-      const inline = decoratorsOf(line.match(/^\s*(?:@\w+(?:\([^)]*\))?\s*)*/)?.[0] ?? '');
-      const rest = line.replace(/^\s*(?:@\w+(?:\([^)]*\))?\s*)*/, '');
+      const { decorators: inline, rest } = splitDecorators(line);
       const decorators = [...pending, ...inline];
       // The disable comment may sit above the decorator lines or directly above the field name.
       const disabledRules = [
@@ -483,24 +746,20 @@ export class NaiveExtractor implements FactExtractor {
       ];
       pending = [];
 
-      const mm = rest.match(METHOD);
-      if (mm && !/^\s*\w+\s*[?!]?\s*:/.test(rest)) {
-        let mEnd = i;
-        while (mEnd + 1 < end && !(depthAfter(mEnd) <= structDepth + 1 && (mEnd > i || code[i].includes('}')))) {
-          mEnd++;
-        }
-        methods.push({ name: mm[1], decorators, firstLine: i, lastLine: mEnd });
-        i = mEnd;
+      const kind = memberKind(rest);
+      if (kind?.kind === 'method') {
+        methods.push({ name: kind.name, decorators, firstLine: i, lastLine: last });
         continue;
       }
-      const fm = rest.match(FIELD);
-      if (fm) {
+      if (kind?.kind === 'field') {
+        const { fm } = kind;
         fields.push({
           name: fm[1],
           line: i + 1,
           decorators,
-          type: fm[2]?.trim(),
+          type: fieldType(fm),
           hasInitializer: fm[3] !== undefined,
+          literal: literalOf(fm),
           readsInBuild: [],
           writes: [],
           disabledRules,
@@ -526,19 +785,19 @@ export class NaiveExtractor implements FactExtractor {
     const isBuild = m.name === 'build' || m.decorators.includes('@Builder');
     for (let i = m.firstLine; i <= m.lastLine; i++) {
       const line = code[i];
-      for (const hit of line.matchAll(/this\.(\w+)/g)) {
+      for (const hit of line.matchAll(/this\.([\w$]+)/g)) {
         const field = fields.get(hit[1]);
         if (!field) {
           continue;
         }
         const after = line.slice((hit.index ?? 0) + hit[0].length);
-        const chain = after.match(/^((?:\??\.\w+|\[[^\]]*\])*)/)?.[1] ?? '';
+        const chain = after.match(/^((?:\??\.[\w$]+|\[[^\]]*\])*)/)?.[1] ?? '';
         const tail = after.slice(chain.length);
         const before = line.slice(0, hit.index ?? 0);
 
-        const lastCall = chain.match(/\.(\w+)$/)?.[1];
+        const lastCall = chain.match(/\.([\w$]+)$/)?.[1];
         const mutatingCall = lastCall !== undefined && MUTATING_CALLS.has(lastCall) && /^\s*\(/.test(tail);
-        const assigned = /^\s*(?:=(?![=>])|\+=|-=|\*=|\/=|%=|\+\+|--)/.test(tail) || /(?:\+\+|--)\s*$/.test(before);
+        const assigned = ASSIGNED_AFTER.test(tail) || /(?:\+\+|--)\s*$/.test(before);
 
         if (!assigned && !mutatingCall) {
           if (isBuild && !field.readsInBuild.includes(i + 1)) {
@@ -546,7 +805,7 @@ export class NaiveExtractor implements FactExtractor {
           }
           continue;
         }
-        const nested = mutatingCall ? `${chain.replace(/\.\w+$/, '')}[]` : chain;
+        const nested = mutatingCall ? `${chain.replace(/\.[\w$]+$/, '')}[]` : chain;
         const window = code.slice(Math.max(m.firstLine, i - 3), i + 1).join('\n');
         const isAsync = ASYNC_MARKERS.test(window);
         const context: WriteContext = isAsync
@@ -561,6 +820,7 @@ export class NaiveExtractor implements FactExtractor {
           context,
           method: m.name,
           nestedPath: nested || undefined,
+          value: mutatingCall ? undefined : assignedValue(tail),
           disabledRules: disabledRulesAt(raw, i),
         });
       }
@@ -577,7 +837,7 @@ export class NaiveExtractor implements FactExtractor {
         .filter((m) => hooks.has(m.name))
         .flatMap((h) => [
           { m: h, via: h.name },
-          ...[...new Set([...body(h).matchAll(/\bthis\.(\w+)\s*\(/g)].map((x) => x[1]))]
+          ...[...new Set([...body(h).matchAll(/\bthis\.([\w$]+)\s*\(/g)].map((x) => x[1]))]
             .map((n) => methods.find((m) => m.name === n && !LIFECYCLE.has(n)))
             .filter((m): m is Method => m !== undefined)
             .map((m) => ({ m, via: `${h.name}→${m.name}` })),
@@ -586,9 +846,6 @@ export class NaiveExtractor implements FactExtractor {
     const released = scope(RELEASE_HOOKS)
       .map((s) => body(s.m))
       .join('\n');
-    function esc(s: string) {
-      return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    }
     const out: ResourceFact[] = [];
     const seen = new Set<string>();
     function add(r: ResourceFact) {
@@ -673,6 +930,15 @@ export type CandidateKind =
 export type Candidate = CandidateBase &
   ({ field: FieldFact; resource?: never } | { resource: ResourceFact; field?: never });
 
+/** Why V2 misses a write: its owner is a plain class, a plain object type (interface or object type alias), an object
+ *  literal, an @ObservedV2 class whose property lacks @Trace, or a container nested in another. owner is the class that
+ *  declares the property, or for an object literal or nested container the path that holds it. */
+export interface V2Gap {
+  kind: 'class' | 'object-type' | 'object-literal' | 'untraced' | 'nested-container';
+  owner: string;
+  property: string;
+}
+
 interface CandidateBase {
   rule: RuleId;
   kind: CandidateKind;
@@ -681,6 +947,8 @@ interface CandidateBase {
   line: number;
   /** Nested-write: every unobserved write, in source order. */
   writes?: WriteFact[];
+  /** V2 nested-write: why V2 misses the writes, one entry per distinct gap. */
+  gaps?: V2Gap[];
   /** Stable across runs: dedupe, cache, dismissals. */
   fingerprint: string;
 }
@@ -697,6 +965,8 @@ const REACTIVE_V1 = new Set([
   '@LocalStorageLink',
   '@LocalStorageProp',
 ]);
+/** V2 state the component itself initializes. */
+const OWNED_V2 = new Set(['@Local']);
 const REACTIVE_V2 = new Set(['@Local', '@Param', '@Provider', '@Consumer']);
 // Fields that never hold renderable state.
 const NON_STATE = new Set(['@BuilderParam', '@Event', '@Require']);
@@ -707,15 +977,19 @@ function isReactive(f: FieldFact) {
 function isReactiveV1(f: FieldFact) {
   return f.decorators.some((d) => REACTIVE_V1.has(d));
 }
-function baseType(t?: string) {
-  return t
-    ?.replace(/\[\]$/, '')
-    .replace(/\s*\|\s*(undefined|null)$/, '')
-    .trim();
+
+/** The property name of a `.x` or `?.x` segment; undefined for an index. */
+function segmentProp(s: string): string | undefined {
+  return s.match(/^\??\.([\w$]+)$/)?.[1];
+}
+
+/** Text as a RegExp source. */
+function esc(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 function segments(path?: string) {
-  return path?.match(/\??\.\w+|\[[^\]]*\]/g) ?? [];
+  return path?.match(/\??\.[\w$]+|\[[^\]]*\]/g) ?? [];
 }
 
 /** Levels below the field a write reaches: ".title" → 1, ".address.city" → 2, "[i].title" → 2, "[]" (array call) → 1. */
@@ -733,6 +1007,12 @@ function own<T>(map: Record<string, T>, key: string): T | undefined {
   return Object.hasOwn(map, key) ? map[key] : undefined;
 }
 
+/** The class a field of type t holds: the element class for an array, without null, undefined or type arguments. */
+export function typeClass(t: string, facts: FileFacts): string {
+  const held = nonNull(t);
+  return className(elementType(held, facts) ?? held);
+}
+
 /** Element type of X[], Array<X>, or a file class extending Array<…> (its type parameters bound from t's arguments). */
 function elementType(t: string, facts: FileFacts): string | undefined {
   const builtin = (t.match(/^(.+)\[\]$/) ?? t.match(/^Array<(.+)>$/))?.[1].trim();
@@ -743,28 +1023,113 @@ function elementType(t: string, facts: FileFacts): string | undefined {
   if (!cls) {
     return undefined;
   }
-  const args =
-    t
-      .match(/<(.+)>$/)?.[1]
-      .split(',')
-      .map((a) => a.trim()) ?? [];
+  const args = splitTopLevel(t.match(/<(.+)>$/)?.[1] ?? '', ',').map((a) => a.trim());
   const param = cls.params.indexOf(cls.element);
   return param < 0 ? cls.element : args[param];
 }
 
-/** Declared type of this.<field><segs>, from the field's type and the file's class fields; undefined when unknown. */
-function typeAt(fieldType: string | undefined, segs: string[], facts: FileFacts): string | undefined {
-  let t = fieldType && nonNull(fieldType);
-  for (const s of segs) {
-    if (t === undefined) {
-      return undefined;
+/** cls, then the types it extends, nearest first; some may be declared in another file. */
+function ancestry(cls: string, facts: FileFacts): string[] {
+  const chain = [cls];
+  for (let i = 0; i < chain.length; i++) {
+    for (const p of own(facts.classParents, chain[i]) ?? []) {
+      if (!chain.includes(p)) {
+        chain.push(p);
+      }
     }
-    const prop = s.match(/^\??\.(\w+)$/)?.[1];
-    const fields = own(facts.classFields, className(t));
-    const next = prop === undefined ? elementType(t, facts) : fields && own(fields, prop);
-    t = next && nonNull(next);
   }
-  return t;
+  return chain;
+}
+
+/** Declared type of this.<field><segs>, from the field's type and the file's class fields; undefined when unknown. */
+
+interface Step {
+  type?: string;
+  /** Text of the object literal the object here comes from: a plain object. */
+  literal?: string;
+}
+
+/** The object at each prefix of this.<field><segs> (segs.length + 1 steps). Inside a literal, a property's own value text
+ *  decides: `{…}` stays plain, `new X(…)` is an X, anything else takes the declared type and is not known to be plain. A
+ *  property at a path in replaced (normalPath) is assigned elsewhere, so no initializer decides its value. */
+function walk(
+  fieldType: string | undefined,
+  literal: string | undefined,
+  segs: string[],
+  facts: FileFacts,
+  replaced = new Set<string>(),
+): Step[] {
+  const steps: Step[] = [{ type: fieldType && nonNull(fieldType), literal }];
+  for (const [i, s] of segs.entries()) {
+    const prev = steps[steps.length - 1];
+    const prop = segmentProp(s);
+    let next: Step;
+    if (prop === undefined) {
+      next = { type: prev.type && (elementType(prev.type, facts) ?? recordValue(prev.type)) };
+    } else {
+      const cls = prev.type && className(prev.type);
+      const declared = cls ? declaredMember(ancestry(cls, facts), prop, facts) : undefined;
+      if (replaced.has(normalPath(segs.slice(0, i + 1)))) {
+        next = { type: declared?.type }; // assigned elsewhere: its initializer is no longer the value
+      } else if (prev.literal === undefined) {
+        next = { type: declared?.type, literal: declared?.member?.literal };
+      } else {
+        const value = literalValue(prev.literal, prop);
+        const created = value?.match(NEW_INSTANCE)?.[1];
+        next = value?.startsWith('{') ? { type: declared?.type, literal: value } : { type: created ?? declared?.type };
+      }
+    }
+    steps.push({ ...next, type: next.type && nonNull(next.type) });
+  }
+  return steps;
+}
+
+/** Segments with every index as [] and no ?., so writes through different indexes share one path. */
+function normalPath(segs: string[]): string {
+  return segs.map((s) => (s.startsWith('[') ? '[]' : `.${segmentProp(s)}`)).join('');
+}
+
+/** What a field's writes share when judged: the field's literal value (see v2Gap) and the paths it assigns. */
+interface FieldContext {
+  literal?: string;
+  replaced: Set<string>;
+}
+
+function fieldContext(f: FieldFact): FieldContext {
+  // The initializer's literal is the value only for state the component alone sets (a @Param, @Consumer or @Provider can
+  // get its value from elsewhere), and only until a reassignment: one that assigns literals keeps the object plain, with
+  // its contents unknown.
+  const reassignments = f.writes.filter((x) => x.nestedPath === undefined);
+  const owned = f.decorators.some((d) => OWNED_V2.has(d)) && f.literal !== undefined;
+  const literal = !owned
+    ? undefined
+    : reassignments.length === 0
+      ? f.literal
+      : reassignments.every((x) => x.value === 'object-literal')
+        ? '{}'
+        : undefined;
+  const replaced = new Set(
+    f.writes
+      .filter((x) => x.nestedPath !== undefined && x.value !== undefined && x.value !== 'object-literal')
+      .map((x) => normalPath(segments(x.nestedPath))),
+  );
+  return { literal, replaced };
+}
+
+/** The value type of Record<K, V>. */
+function recordValue(t: string): string | undefined {
+  const args = t.match(/^Record\s*<(.+)>$/)?.[1];
+  return args === undefined ? undefined : splitTopLevel(args, ',')[1]?.trim();
+}
+
+/** Inline object types and records: plain objects whatever they hold. */
+function isPlainType(t: string): boolean {
+  return t.startsWith('{') || /^(?:Record|Object|object)\b/.test(t);
+}
+
+/** Types whose index writes and API calls V2 observes on an observed property. */
+function isContainer(t: string, facts: FileFacts): boolean {
+  return elementType(t, facts) !== undefined || /^(?:Map|Set|Date|WeakMap|WeakSet)$/.test(className(t));
 }
 
 /** Whether build() or a @Builder reads this.<field><path> or deeper; any index matches any index, with or without ?. before
@@ -772,9 +1137,11 @@ function typeAt(fieldType: string | undefined, segs: string[], facts: FileFacts)
 function rendersPath(f: FieldFact, path: string, facts: FileFacts): boolean {
   const arrayCall = path.endsWith('[]');
   const tail = segments(arrayCall ? path.slice(0, -2) : path)
-    .map((s) => (s.startsWith('[') ? '(?:\\?\\.)?\\[[^\\]]*\\]' : `\\??\\.${s.replace(/^\??\./, '')}`))
+    .map((s) => (s.startsWith('[') ? '(?:\\?\\.)?\\[[^\\]]*\\]' : `\\??\\.${esc(segmentProp(s) ?? '')}`))
     .join('');
-  const read = new RegExp(`\\bthis\\.${f.name}${tail}${arrayCall ? '(?:(?:\\?\\.)?\\[|\\??\\.\\w)' : '(?!\\w)'}`);
+  const read = new RegExp(
+    `\\bthis\\.${esc(f.name)}${tail}${arrayCall ? '(?:(?:\\?\\.)?\\[|\\??\\.[\\w$])' : '(?![\\w$])'}`,
+  );
   return f.readsInBuild.some((l) => read.test(facts.lines[l - 1] ?? ''));
 }
 
@@ -782,7 +1149,7 @@ function rendersPath(f: FieldFact, path: string, facts: FileFacts): boolean {
  *  docs), so a deep write is seen when a child in the file takes the owning class as @ObjectLink, unless the parent renders the
  *  path itself. */
 function seenByObjectLink(f: FieldFact, nestedPath: string, facts: FileFacts): boolean {
-  const owner = typeAt(f.type, segments(nestedPath).slice(0, -1), facts);
+  const owner = walk(f.type, undefined, segments(nestedPath).slice(0, -1), facts).at(-1)?.type;
   if (owner === undefined) {
     return false;
   }
@@ -794,20 +1161,136 @@ function seenByObjectLink(f: FieldFact, nestedPath: string, facts: FileFacts): b
   );
 }
 
+/** OpenHarmony docs (@Local, @ObservedV2 and @Trace): V2 sees an array's index writes and API calls (also Map, Set, Date)
+ *  when the container itself is observed, and a property write only when the property is @Trace (or a setter) on an
+ *  @ObservedV2 class, inherited ones included; plain objects are never observed. Undefined when V2 sees the write, or when it
+ *  can't be judged: the owner type is unknown, declared elsewhere, or an interface whose object may be a class instance. A
+ *  container inside another container (`grid[i]`) is not proxied: its writes are missed. */
+function v2Gap(f: FieldFact, w: WriteFact, facts: FileFacts, field: FieldContext): V2Gap | undefined {
+  const segs: string[] = segments(w.nestedPath);
+  const steps = walk(f.type, field.literal, segs.slice(0, -1), facts, field.replaced);
+  let ownerSegs = segs.slice(0, -1);
+  let last = segs.at(-1) ?? '';
+  if (last.startsWith('[')) {
+    const { type: containerType, literal: containerLiteral } = steps[ownerSegs.length];
+    const unknown = containerType === undefined && containerLiteral === undefined;
+    if (unknown || (containerType !== undefined && isContainer(containerType, facts))) {
+      // The write changes the container (an unknown type is taken for one) held by the property before it.
+      if (ownerSegs.length === 0) {
+        return undefined;
+      }
+      if (ownerSegs[ownerSegs.length - 1].startsWith('[')) {
+        if (unknown) {
+          return undefined; // an element of unknown type may be any object
+        }
+        const outer = steps[ownerSegs.length - 1];
+        if (outer.literal !== undefined || (outer.type !== undefined && isPlainType(outer.type))) {
+          // The container sits in a plain object (a record): the object is what V2 misses.
+          const holder = ownerSegs.slice(0, -1);
+          return { kind: 'object-literal', owner: ownerPath(f, holder), property: ownerSegs[ownerSegs.length - 1] };
+        }
+        return { kind: 'nested-container', owner: ownerPath(f, ownerSegs), property: '' };
+      }
+      last = ownerSegs[ownerSegs.length - 1];
+      ownerSegs = ownerSegs.slice(0, -1);
+    } else if (last === '[]') {
+      return undefined; // a call named like a container mutation on some other object: not judged
+    }
+  }
+  const { type: owner, literal } = steps[ownerSegs.length];
+  if (owner !== undefined && elementType(owner, facts) !== undefined) {
+    return undefined;
+  }
+  const property = segmentProp(last) ?? last;
+  const cls = owner && className(owner);
+  const objectType = cls !== undefined && factSets(facts).types.has(cls);
+  if (literal !== undefined || (owner !== undefined && isPlainType(owner))) {
+    if (objectType) {
+      return { kind: 'object-type', owner: cls, property };
+    }
+    return { kind: 'object-literal', owner: ownerPath(f, ownerSegs), property };
+  }
+  if (cls === undefined || objectType || last.startsWith('[')) {
+    return undefined; // a computed key on a class instance names no known member
+  }
+  const chain = ancestry(cls, facts);
+  const { declaring, member } = declaredMember(chain, property, facts);
+  if (!member && !allKnown(chain, facts)) {
+    return undefined;
+  }
+  const traced = member?.setter || member?.decorators.includes('@Trace');
+  if ((traced && chain.some((c) => isV2(c, facts))) || !rendersPath(f, [...ownerSegs, last].join(''), facts)) {
+    return undefined; // observed, or a property nothing renders: leaving it untraced is the point of per-property @Trace
+  }
+  // @Trace compiles only inside an @ObservedV2 class.
+  return { kind: isV2(declaring, facts) ? 'untraced' : 'class', owner: declaring, property };
+}
+
+/** this.<field><segs> as a normalPath, so writes through different indexes share one owner. */
+function ownerPath(f: FieldFact, segs: string[]): string {
+  return `this.${f.name}${normalPath(segs)}`;
+}
+
+/** The facts' name lists as sets, built once per FileFacts. */
+const factSetsCache = new WeakMap<FileFacts, { classes: Set<string>; types: Set<string>; v2: Set<string> }>();
+function factSets(facts: FileFacts) {
+  let sets = factSetsCache.get(facts);
+  if (!sets) {
+    sets = {
+      classes: new Set(facts.declaredClasses),
+      types: new Set(facts.declaredTypes),
+      v2: new Set(facts.observedV2Classes),
+    };
+    factSetsCache.set(facts, sets);
+  }
+  return sets;
+}
+
+const isV2 = (c: string, facts: FileFacts) => factSets(facts).v2.has(c);
+/** Every class in chain is declared in the facts (none comes from an unread module). */
+const allKnown = (chain: string[], facts: FileFacts) => chain.every((c) => factSets(facts).classes.has(c));
+
+/** The nearest class in chain that declares property, with its member facts and declared type; chain[0] when none does. */
+function declaredMember(
+  chain: string[],
+  property: string,
+  facts: FileFacts,
+): { declaring: string; member?: ClassMember; type?: string } {
+  for (const c of chain) {
+    const members = own(facts.classMembers, c);
+    const member = members && own(members, property);
+    if (member) {
+      return { declaring: c, member, type: member.type };
+    }
+  }
+  return { declaring: chain[0] };
+}
+
 /** Writes the decorator can't see, minus writes under a disable comment. V1: deeper than the first layer, even with @Observed
- *  classes, unless an @ObjectLink child sees them. V2: any property write unless the class is @ObservedV2. */
-function unobservedWrites(f: FieldFact, facts: FileFacts) {
+ *  classes, unless an @ObjectLink child sees them. V2: see v2Gap, whose distinct gaps come back too. */
+function unobservedWrites(f: FieldFact, facts: FileFacts): { writes: WriteFact[]; gaps?: V2Gap[] } {
   const writes = f.writes.filter((w) => !w.disabledRules.includes('R1'));
   if (isReactiveV1(f)) {
-    return writes.filter(
-      (w) => w.nestedPath !== undefined && nestedDepth(w.nestedPath) >= 2 && !seenByObjectLink(f, w.nestedPath, facts),
-    );
+    return {
+      writes: writes.filter(
+        (w) =>
+          w.nestedPath !== undefined && nestedDepth(w.nestedPath) >= 2 && !seenByObjectLink(f, w.nestedPath, facts),
+      ),
+    };
   }
-  const type = baseType(f.type);
-  if (type !== undefined && facts.observedV2Classes.includes(type)) {
-    return [];
+  const field = fieldContext(f);
+  const unseen: WriteFact[] = [];
+  const gaps = new Map<string, V2Gap>();
+  for (const w of writes) {
+    const gap = w.nestedPath === undefined ? undefined : v2Gap(f, w, facts, field);
+    if (gap) {
+      unseen.push(w);
+      gaps.set(`${gap.kind} ${gap.owner} ${gap.kind === 'untraced' ? gap.property : ''}`, {
+        ...gap,
+      });
+    }
   }
-  return writes.filter((w) => w.nestedPath && w.nestedPath !== '[]');
+  return { writes: unseen, gaps: [...gaps.values()] };
 }
 
 export function candidates(facts: FileFacts): Candidate[] {
@@ -830,7 +1313,7 @@ export function candidates(facts: FileFacts): Candidate[] {
         });
       }
 
-      const nested = isReactive(f) ? unobservedWrites(f, facts) : [];
+      const { writes: nested, gaps } = isReactive(f) ? unobservedWrites(f, facts) : { writes: [] };
       if (nested.length > 0 && f.readsInBuild.length > 0 && !f.disabledRules.includes('R1')) {
         out.push({
           rule: 'R1',
@@ -840,6 +1323,7 @@ export function candidates(facts: FileFacts): Candidate[] {
           field: f,
           line: nested[0].line,
           writes: nested,
+          gaps,
           fingerprint: `${facts.file}#${c.name}.${f.name}#R1-nested`,
         });
       }

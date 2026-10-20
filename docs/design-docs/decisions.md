@@ -10,6 +10,16 @@
 - **R1 nested write with `@ObjectLink`** (2026-10-13): a V1 write two or more levels deep is silent, not downgraded, when the
   class owning the written property is `@Observed`, a child takes that class as `@ObjectLink`, and the parent doesn't render
   the path itself. Same file first; cross-file children come with the cross-file facts.
+- **R1 nested write, V2** (2026-10-19): a write is judged by the type that owns the written property. An index write or
+  array call counts as a write to the array property, so it is judged by the array's holder. Plain classes are flagged, and
+  so are plain objects: anything inside an object-literal initializer, inline object types and records. A property without
+  `@Trace` on an `@ObservedV2` class is flagged too (the fix names the class that declares it; writes through a setter count
+  as observed). Class and `@Trace` gaps need the property they name to be rendered (for a write into an array, the array, so
+  `ForEach(this.store.items, …)` counts): an untraced property nothing renders is the point of per-property `@Trace`. Interface-typed objects are flagged only when known to be literals, since they may hold
+  class instances. Writes into a container nested in another (`grid[i][j]`) are flagged. An object-literal initializer
+  counts only for `@Local` (and class fields nothing reassigns), and only while every reassignment also assigns a literal.
+  Owners not declared in the file are skipped; cross-file owners will come from ace-server (`definition` on the written
+  property), not from a resolver of our own.
 - **Disable comments** (2026-10-13): `// arkui-sem-disable-next-line <rules>` works above the field name, above its decorator
   lines, and above a single write (that write only, for nested-write findings); R1 and R3 share one parser.
 - **Later:** an ArkAnalyzer extractor behind the `FactExtractor` interface; then re-run on the union of candidates.

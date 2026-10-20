@@ -12,7 +12,7 @@ import {
   score,
   TypeSafeClient,
 } from '@typesafe-ai/sdk';
-import { type Candidate, type FileFacts, nestedDepth } from './analysis.js';
+import { type Candidate, type FileFacts, nestedDepth, typeClass } from './analysis.js';
 import type { Credentials } from './config.js';
 
 // --- System One interface, Jev, Clef ---
@@ -351,14 +351,15 @@ export function buildSlice(
 
   if (c.field) {
     const f = c.field;
+    const shown = c.writes ?? f.writes; // a nested-write candidate shows the writes it flags
     lines.add(f.line);
     for (const l of f.readsInBuild.slice(0, 2)) {
       lines.add(l);
     }
-    for (const w of f.writes.slice(0, 3)) {
+    for (const w of shown.slice(0, 3)) {
       lines.add(w.line);
     }
-    const typeName = f.type?.replace(/\[\]$/, '').trim();
+    const typeName = f.type && typeClass(f.type, facts);
     if (c.rule === 'R2') {
       // No decorators: R2 asks for the intent the decorator should express.
       candidate = {
@@ -384,7 +385,7 @@ export function buildSlice(
         type: f.type ?? null,
         has_initializer: f.hasInitializer,
         reads_in_build: f.readsInBuild.length,
-        writes: f.writes.slice(0, 5).map((w) => ({
+        writes: shown.slice(0, 5).map((w) => ({
           line: w.line,
           context: w.context,
           method: w.method,
@@ -393,9 +394,14 @@ export function buildSlice(
           external: w.external ?? false,
         })),
         type_is_observed_class: typeName ? facts.observedClasses.includes(typeName) : null,
-        type_is_observed_v2_class: typeName ? facts.observedV2Classes.includes(typeName) : null,
         object_link_types_in_file: facts.objectLinkTypes,
-        type_declared_in_file: typeName ? facts.declaredClasses.includes(typeName) : null,
+        // V2 gaps name the classes the writes miss; the field's own class would contradict them for deeper writes.
+        ...(c.gaps
+          ? { v2_gaps: c.gaps.map((g) => ({ ...g })) }
+          : {
+              type_is_observed_v2_class: typeName ? facts.observedV2Classes.includes(typeName) : null,
+              type_declared_in_file: typeName ? facts.declaredClasses.includes(typeName) : null,
+            }),
       };
     }
   } else {
